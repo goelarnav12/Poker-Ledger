@@ -15,7 +15,9 @@
 <meta name="apple-mobile-web-app-title" content="Poker Ledger">
 <!-- black-translucent so the masthead sits under a transparent status bar -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="apple-touch-icon" href="icon.svg">
+<!-- PNG, not SVG: iOS silently ignores an SVG apple-touch-icon and falls back
+     to a screenshot of the page. 180px is the size current iPhones ask for. -->
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <!-- Inline SVG chip, so the favicon costs no extra request and can't 404. -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2316150F'/><circle cx='16' cy='16' r='9' fill='none' stroke='%23EDE7D9' stroke-width='3'/><circle cx='16' cy='16' r='3' fill='%23EDE7D9'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">

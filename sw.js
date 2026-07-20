@@ -9,7 +9,7 @@
 // Bump CACHE when the shell list changes; activate() deletes every other cache.
 // ---------------------------------------------------------------------------
 
-const CACHE = 'poker-ledger-v1';
+const CACHE = 'poker-ledger-v2';
 
 // Relative, never absolute: this is served from the domain root on Vercel but
 // from /Poker-Ledger/ on GitHub Pages, and absolute paths would break one.
@@ -21,7 +21,10 @@ const SHELL = [
   './stats.js',
   './app.js',
   './manifest.webmanifest',
-  './icon.svg'
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png'
 ];
 
 self.addEventListener('install', event => {
