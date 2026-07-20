@@ -8,22 +8,29 @@
 -- the net result. The app only ever displays (cash_out - buy_in), so this
 -- reads correctly everywhere.
 
--- Fail loudly rather than inserting nothing: if the address below matches no
--- auth.users row, the CTE is empty, the cross join yields zero rows, and the
--- editor just reports success on 0 rows. (The address appears twice — here and
--- in the `me` CTE. Change both.)
+-- ===========================================================================
+-- STEP 1 — put your Ledger login address here, replacing the placeholder.
+-- This is the only place it appears; everything below reads it back.
+-- ===========================================================================
+select set_config('ledger.email', 'you@example.com', false);
+
+-- Fail loudly rather than inserting nothing: if the address above matches no
+-- auth.users row, the CTE below is empty, the cross join yields zero rows, and
+-- the editor just reports success on 0 rows.
 do $$
 begin
   if not exists (
-    select 1 from auth.users where lower(email) = lower('goelarnav12@gmail.com')
+    select 1 from auth.users
+    where lower(email) = lower(current_setting('ledger.email'))
   ) then
-    raise exception 'No auth.users row matches that email. Sign up in the app first, or correct the address in this script.';
+    raise exception 'No auth.users row matches %. Sign up in the app first, or correct the address at the top of this script.',
+      current_setting('ledger.email');
   end if;
 end $$;
 
 with me as (
-  -- >>> Change this if your Ledger login is a different address. <<<
-  select id from auth.users where lower(email) = lower('goelarnav12@gmail.com')
+  select id from auth.users
+  where lower(email) = lower(current_setting('ledger.email'))
 ),
 incoming(date, location, stakes, buy_in, cash_out, currency, notes) as (
   values
