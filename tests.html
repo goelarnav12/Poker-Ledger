@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Ledger — tests</title>
+<style>
+  body{background:#0A2E22;color:#F3EAD8;font-family:ui-monospace,'IBM Plex Mono',monospace;
+       margin:0;padding:32px;line-height:1.5;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{color:#7C8B85;font-size:12px;margin-bottom:20px;}
+  #summary{font-size:16px;margin-bottom:20px;}
+  ul{list-style:none;padding:0;margin:0;max-width:900px;}
+  li{padding:8px 12px;border-left:3px solid;background:rgba(255,255,255,0.03);
+     margin-bottom:4px;border-radius:0 5px 5px 0;font-size:13px;}
+  li.good{border-color:#C9A227;}
+  li.bad{border-color:#A8324A;background:rgba(168,50,74,0.12);}
+  .mark{display:inline-block;width:44px;font-weight:700;}
+  .good .mark{color:#E0BC3E;}
+  .bad .mark{color:#FF6B87;}
+  .detail{display:block;margin-left:44px;color:#C9BFA9;font-size:12px;}
+  .bad .detail{color:#FF9FB2;}
+</style>
+</head>
+<body>
+  <h1>The Ledger — stats.js tests</h1>
+  <div class="sub">Pure-function tests. No Supabase, no network. Reload to re-run.</div>
+  <div id="summary">running…</div>
+  <ul id="results"></ul>
+
+  <!-- config.js is deliberately NOT loaded: tests pin their own rates via
+       setCurrencyConfig() so retuning FX_RATES can't turn them red. -->
+  <script src="stats.js"></script>
+  <script src="tests.js"></script>
+</body>
+</html>

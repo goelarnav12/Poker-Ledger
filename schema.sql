@@ -11,10 +11,15 @@ create table if not exists sessions (
   stakes text not null,
   buy_in numeric not null,
   cash_out numeric not null,
-  hours numeric not null,
+  -- Amounts above are denominated in this currency. The app converts to
+  -- BASE_CURRENCY for totals using the FX_RATES map in config.js.
+  currency text not null default 'INR' check (currency ~ '^[A-Z]{3}$'),
   notes text,
   created_at timestamptz not null default now()
 );
+
+-- Every query the app makes is "my sessions, by date", so index exactly that.
+create index if not exists sessions_user_date_idx on sessions (user_id, date);
 
 alter table sessions enable row level security;
 
@@ -27,9 +32,12 @@ create policy "insert own sessions"
   on sessions for insert
   with check (auth.uid() = user_id);
 
+-- `with check` as well as `using`, otherwise an update could reassign user_id
+-- and hand the row to another account.
 create policy "update own sessions"
   on sessions for update
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create policy "delete own sessions"
   on sessions for delete
