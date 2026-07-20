@@ -1,88 +1,140 @@
 # The Ledger — Poker Session Tracker
 
-A real, standalone website (not a Claude artifact) for tracking your cash game
-sessions: buy-in/cash-out, hourly rate, win rate, a cumulative profit chart,
-and results broken down by stakes. Your data is stored in your own free
-Supabase database and protected behind your own login, so it follows you
-across any device or browser.
+A standalone website for tracking cash game sessions: profit and loss per
+session, a cumulative bankroll chart, monthly and per-stakes breakdowns, and
+distribution stats (median, standard deviation, max drawdown, streaks).
+Sessions can be recorded in multiple currencies and are totalled in one.
 
-Total cost: **$0**. Setup time: **~10 minutes**.
+Your data lives in your own free Supabase database behind your own login, so it
+follows you across devices and nobody else can read it.
+
+No build step, no package manager, no framework. Total cost: **$0**.
 
 ---
 
-## 1. Create your free database (Supabase)
+## Setup
 
-1. Go to [supabase.com](https://supabase.com) and sign up for a free account.
-2. Click **New Project**. Pick any name, a database password (save it
-   somewhere safe), and a region close to you. Free tier is fine.
-3. Once the project finishes provisioning, open the **SQL Editor** in the
-   left sidebar, click **New Query**, paste in the entire contents of
-   `schema.sql` (included in this folder), and click **Run**.
-   This creates your `sessions` table and locks it down so only you can
-   ever read or write your own rows.
-4. Go to **Project Settings → API Keys**. Copy:
-   - The **Project URL**
-   - The **Publishable key** (starts with `sb_publishable_...`) — on the
-     "Publishable and secret API keys" tab. If your project only shows a
-     "Legacy API Keys" tab, use the **anon** key instead; it works exactly
-     the same way.
+### 1. Create the database
 
-## 2. Connect the site to your database
+1. Sign up at [supabase.com](https://supabase.com) and click **New Project**.
+   Save the database password somewhere; pick a region near you.
+2. Open **SQL Editor → New Query**, paste the entire contents of
+   [`schema.sql`](schema.sql), and Run.
 
-Open `config.js` in this folder and paste in the two values:
+   This creates the `sessions` table, an index, and four Row Level Security
+   policies that restrict every row to the account that created it.
+
+### 2. Connect the site
+
+**Project Settings → API Keys**, then copy two values into
+[`config.js`](config.js):
 
 ```js
-const SUPABASE_URL = "https://xxxxx.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_xxxxxxxxxxxx";
+const SUPABASE_URL = "https://xxxxx.supabase.co";   // "Project URL"
+const SUPABASE_ANON_KEY = "sb_publishable_xxxx";    // "Publishable key"
 ```
 
-Save the file. That's the only code change you need to make.
+The URL must be the `https://<ref>.supabase.co` API host — **not** the
+`supabase.com/dashboard/project/...` address in your browser bar. Using the
+dashboard URL makes every request fail.
 
-## 3. Host it for free
+Older projects show a "Legacy API Keys" tab instead; the **anon** key there
+works identically.
 
-Any static host works since this is plain HTML/CSS/JS. Two easy options:
+### 3. Set your currencies
 
-### Option A — Netlify Drop (fastest, no account needed to try it)
-1. Go to [app.netlify.com/drop](https://app.netlify.com/drop).
-2. Drag this whole folder (`poker-tracker`) into the browser window.
-3. You'll get a live `https://your-site-name.netlify.app` URL instantly.
-4. Sign up for a free Netlify account if you want the link to stay live
-   permanently and be able to update it later.
+Also in `config.js`:
 
-### Option B — GitHub Pages
-1. Create a free GitHub account and a new repository.
-2. Upload all the files in this folder to the repository (drag-and-drop
-   works fine on github.com, or use `git push` if you're comfortable with git).
-3. Go to the repo's **Settings → Pages**, set the source to your main branch
-   and root folder, and save.
-4. Your site will be live at `https://yourusername.github.io/repo-name`
-   within a minute or two.
+```js
+const BASE_CURRENCY = "INR";
+const FX_RATES = { INR: 1, HKD: 11.15 };
+```
 
-Cloudflare Pages and Vercel are also free and work the same way if you'd
-rather use one of those.
+Sessions are stored in the currency you played in. Every total, both bar
+charts, and the Net Profit figure are converted to `BASE_CURRENCY` using these
+rates. The currency dropdown in the form is generated from these keys, so
+adding a currency here is the only change needed.
 
-## 4. Start tracking
+Rates are static, not live. Changing one restates every past session in that
+currency — fine for a ledger you read in one denomination, but be aware the
+historical numbers move.
 
-Visit your new URL, click **Sign Up**, enter an email and password, and log
-your first session. If your Supabase project has email confirmation turned
-on (it's on by default), check your inbox and confirm before logging in —
-or turn it off for personal use under **Authentication → Providers → Email**
-in the Supabase dashboard.
+### 4. Create your login
+
+Serve the folder and sign up:
+
+```sh
+python3 -m http.server 8000   # then open http://localhost:8000
+```
+
+Supabase requires email confirmation by default. Either click the link it
+sends, or turn it off under **Authentication → Sign In / Providers → Email**.
+
+If you are hosting the site anywhere other than localhost, set
+**Authentication → URL Configuration → Site URL** to that address first, or
+the confirmation link will point at localhost and fail.
 
 ---
 
-## Notes on security
+## Hosting
 
-The publishable/anon key is meant to be public — it's safe to have it sitting
-in your site's source code. What actually protects your data is the Row
-Level Security policy in `schema.sql`, which only allows a logged-in user to
-see or modify rows where `user_id` matches their own account. Don't lose
-this policy if you ever edit the schema.
+Plain static files, so any static host works: GitHub Pages (Settings → Pages →
+Deploy from a branch → `main` → `/ (root)`), Netlify Drop, Cloudflare Pages,
+Vercel.
+
+Two things to do once it is public:
+
+- Set the Supabase **Site URL** to your live address, as above.
+- Turn **off** new signups once your own account exists
+  (**Authentication → Sign In / Providers → Email**). Otherwise anyone who
+  finds the URL can create an account on your project. They could never read
+  your sessions — RLS prevents that — but they would consume your free tier.
+
+---
+
+## Tests
+
+Open [`tests.html`](tests.html) in a browser. Reload to re-run.
+
+It exercises the pure functions in `stats.js` — currency conversion,
+formatting, and every statistic — with no network, no Supabase, and no
+framework. Currency rates are pinned inside the tests, so retuning `FX_RATES`
+cannot turn them red.
+
+---
 
 ## Files
 
-- `index.html` — page structure
-- `style.css` — styling
-- `app.js` — auth + data logic
-- `config.js` — your Supabase credentials go here
-- `schema.sql` — run once in Supabase to set up the database
+| File | Purpose |
+|---|---|
+| `index.html` | Page structure |
+| `style.css` | Styling |
+| `config.js` | Your Supabase credentials and currency settings |
+| `stats.js` | Pure logic: money, formatting, statistics. No DOM, no network. |
+| `app.js` | Auth, data access, rendering |
+| `tests.html` / `tests.js` | Test runner for `stats.js` |
+| `schema.sql` | Run once on a new project — current table shape |
+| `migration_001_currency.sql` | Adds `currency`, drops `hours`. Existing projects only. |
+| `migration_002_index.sql` | Adds the `(user_id, date)` index. Existing projects only. |
+| `import_sessions.sql` | One-off backfill of historical sessions |
+
+`schema.sql` always describes the *current* shape of the table, so a fresh
+project needs only that file — the migrations exist to bring older projects up
+to date, and running them on a new project does nothing.
+
+The two structural rules worth keeping: anything deterministic enough to test
+belongs in `stats.js`, and anything that sums across sessions must convert to
+the base currency first.
+
+---
+
+## Security
+
+The publishable/anon key is designed to be public; it is safe in source code
+and in this repository. What actually protects your data is Row Level Security
+— the four policies in `schema.sql` restrict every read and write to rows where
+`user_id` matches the logged-in account.
+
+Those policies are the only thing standing between your data and anyone with
+the key. Never weaken them, and never put a **service role** key in
+`config.js`; that one bypasses RLS entirely.
