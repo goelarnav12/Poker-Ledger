@@ -10,6 +10,7 @@ let currentUser = null;
 let sessions = [];
 let activeFilter = 'all';       // stakes chip
 let activeLocation = 'all';     // venue chip
+let activeRange = 'all';        // 'all' | 'thisMonth' | '90d' | 'thisYear' | 'YYYY-MM'
 let editingId = null;           // non-null while the form is editing a session
 let profitChart, stakesChart, monthlyChart;
 
@@ -53,6 +54,7 @@ async function boot(){
       sessions = [];
       activeFilter = 'all';
       activeLocation = 'all';
+      activeRange = 'all';
       closeForm();
       appView.style.display = 'none';
       authView.style.display = 'flex';
@@ -114,6 +116,22 @@ document.getElementById('signOutBtn').addEventListener('click', async ()=>{
   await client.auth.signOut();
 });
 
+// ---------- Export ----------
+// Deliberately exports every session, not the filtered view: this is a backup,
+// and a backup that silently omits rows is worse than none.
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  if(!sessions.length){ showListStatus('Nothing to export yet.'); return; }
+  const blob = new Blob(['﻿' + toCSV(sessions)], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `poker-ledger-${todayLocal()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
 // ---------- Status messages ----------
 // Replaces the old alert() calls: non-blocking, and screen readers announce
 // them via the role="alert" containers in index.html.
@@ -158,6 +176,9 @@ async function loadSessions(){
         buyIn: Number(r.buy_in),
         cashOut: Number(r.cash_out),
         currency: r.currency || baseCurrency(),
+        // Null stays null — it means "not recorded", which is not the same as
+        // zero and must not become 0 here.
+        hours: r.hours == null ? null : Number(r.hours),
         notes: r.notes || ''
       }));
     }
@@ -181,6 +202,7 @@ function toRow(s){
     buy_in: s.buyIn,
     cash_out: s.cashOut,
     currency: s.currency,
+    hours: s.hours,          // null when left blank
     notes: s.notes
   };
 }
@@ -224,7 +246,9 @@ function showTab(name){
   if(!TABS.includes(name)) name = 'overview';
   TABS.forEach(t=>{
     document.getElementById('panel-' + t).hidden = (t !== name);
-    document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
+    const btn = document.getElementById('tab-' + t);
+    btn.setAttribute('aria-selected', String(t === name));
+    btn.tabIndex = (t === name) ? 0 : -1;      // roving tabindex
   });
   if(location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 
@@ -239,19 +263,53 @@ document.querySelectorAll('.tab').forEach(btn=>{
 });
 window.addEventListener('hashchange', ()=> showTab(location.hash.slice(1)));
 
+// The ARIA tabs pattern: arrows move between tabs, Home/End jump to the ends,
+// and only the selected tab is in the page tab order (roving tabindex) so Tab
+// steps past the tablist rather than through every tab in it.
+document.querySelector('.tabs').addEventListener('keydown', (e)=>{
+  const keys = {ArrowRight:1, ArrowLeft:-1, Home:'first', End:'last'};
+  if(!(e.key in keys)) return;
+  e.preventDefault();
+  const i = TABS.indexOf(document.activeElement.dataset.tab);
+  const move = keys[e.key];
+  const next = move === 'first' ? 0
+             : move === 'last'  ? TABS.length - 1
+             : (i + move + TABS.length) % TABS.length;
+  showTab(TABS[next]);
+  document.getElementById('tab-' + TABS[next]).focus();
+});
+
+// ---------- Shortcuts ----------
+document.addEventListener('keydown', (e)=>{
+  // Never hijack a key while the user is typing, and never override a browser
+  // or OS shortcut.
+  const t = e.target;
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  if(t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if(appView.style.display === 'none') return;
+
+  if(e.key === 'n'){ e.preventDefault(); showTab('sessions'); openForm(null); }
+  else if(e.key === '1'){ e.preventDefault(); showTab('overview'); }
+  else if(e.key === '2'){ e.preventDefault(); showTab('sessions'); }
+});
+
 // ---------- Render ----------
 function render(){
-  const st = computeStats(sessions);
+  // Everything on the page — figures, all three charts, and the list — reflects
+  // the same filtered set. Filtering to 100/200 and seeing all-time stats was
+  // the single most confusing thing about the previous layout.
+  renderFilters();
+  const shown = visibleSessions();
+  const st = computeStats(shown);
 
   renderStrap();
   renderStats(st);
   document.getElementById('sessionCount').textContent =
-    sessions.length + (sessions.length === 1 ? ' session' : ' sessions');
+    shown.length + (shown.length === 1 ? ' session' : ' sessions');
 
   renderChart();
   renderMonthlyChart();
   renderStakesChart();
-  renderFilters();
   renderList();
   renderDatalists();
 }
@@ -288,6 +346,12 @@ function renderStats(st){
                resultClass(st.totalProfit), ' headline'),
     summaryRow('Sessions', String(st.count)),
     summaryRow('Win rate', any ? st.winRate.toFixed(0) + '%' : dash),
+    // Hours are optional, so these two rows only appear once you actually
+    // record some. Until then they would be permanent em-dashes.
+    st.timedCount ? summaryRow('Hourly rate', fmtSigned(Math.round(st.hourly)) + '/hr',
+                               resultClass(st.hourly), '',
+                               `Based on the ${st.timedCount} of ${st.count} sessions with hours recorded.`) : '',
+    st.timedCount ? summaryRow('Hours played', st.totalHours.toFixed(1)) : '',
     summaryRow('Average / session', any ? fmtSigned(Math.round(st.avg)) : dash,
                resultClass(st.avg)),
     summaryRow('Best session', any ? fmtSigned(st.best) : dash, resultClass(st.best)),
@@ -316,6 +380,18 @@ function fillDatalist(id, values){
     values.map(v=>`<option value="${escapeHtml(v)}"></option>`).join('');
 }
 
+// Clicking a bar filters to it, and clicking the active bar again clears —
+// otherwise the only way back is to hunt for the chip.
+function barClickHandler(getValue, apply, current){
+  return (evt, elements, chart)=>{
+    const hit = chart.getElementsAtEventForMode(evt, 'nearest', {intersect:true}, true);
+    if(!hit.length) return;
+    const value = getValue(hit[0].index, chart);
+    apply(value === current() ? 'all' : value);
+    render();
+  };
+}
+
 // Shared Chart.js styling so the three charts stay visually consistent.
 // Cream on warm charcoal. Keep in step with the custom properties in style.css.
 const INK = '#EDE7D9', WIN = 'rgba(95,169,126,0.85)', LOSS = 'rgba(212,105,90,0.85)';
@@ -327,14 +403,15 @@ const MONEY_TOOLTIP = {callbacks:{label: c=>fmt(Math.round(c.parsed.y))}};
 // nothing to plot, and always tear the old Chart.js instance down first — an
 // undestroyed instance keeps its canvas binding and leaks.
 function renderChart(){
-  const has = sessions.length > 0;
+  const shown = visibleSessions();
+  const has = shown.length > 0;
   document.getElementById('profitPanel').style.display = has ? 'block' : 'none';
   if(profitChart){ profitChart.destroy(); profitChart = null; }
   if(!has) return;
 
   const ctx = document.getElementById('profitChart');
   let running = 0;
-  const points = chronological(sessions).map(s=>{
+  const points = chronological(shown).map(s=>{
     running += profitBase(s);
     return {x: s.date, y: running};
   });
@@ -370,13 +447,14 @@ function renderChart(){
 }
 
 function renderMonthlyChart(){
-  const buckets = monthlyTotals(sessions);
+  const buckets = monthlyTotals(visibleSessions());
   const has = buckets.length > 0;
   document.getElementById('monthlyPanel').style.display = has ? 'block' : 'none';
   if(monthlyChart){ monthlyChart.destroy(); monthlyChart = null; }
   if(!has) return;
 
   const data = buckets.map(b=>b.total);
+  const keys = buckets.map(b=>b.key);
   const ctx = document.getElementById('monthlyChart');
   monthlyChart = new Chart(ctx, {
     type:'bar',
@@ -388,6 +466,8 @@ function renderMonthlyChart(){
     options:{
       responsive:true,
       maintainAspectRatio:false,
+      onHover:(e,els)=>{ e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: barClickHandler(i=>keys[i], v=>{ activeRange = v; }, ()=>activeRange),
       plugins:{ legend:{display:false}, tooltip:MONEY_TOOLTIP },
       scales:{
         x:{grid:{display:false}, ticks:{...AXIS_TICKS, size:11}},
@@ -398,13 +478,14 @@ function renderMonthlyChart(){
 }
 
 function renderStakesChart(){
-  const has = sessions.length > 0;
+  const shown = visibleSessions();
+  const has = shown.length > 0;
   document.getElementById('stakesPanel').style.display = has ? 'block' : 'none';
   if(stakesChart){ stakesChart.destroy(); stakesChart = null; }
   if(!has) return;
 
   const byStakes = {};
-  sessions.forEach(s=>{
+  shown.forEach(s=>{
     const k = stakesLabel(s);
     byStakes[k] = (byStakes[k]||0) + profitBase(s);
   });
@@ -422,6 +503,8 @@ function renderStakesChart(){
     options:{
       responsive:true,
       maintainAspectRatio:false,
+      onHover:(e,els)=>{ e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: barClickHandler(i=>labels[i], v=>{ activeFilter = v; }, ()=>activeFilter),
       plugins:{ legend:{display:false}, tooltip:MONEY_TOOLTIP },
       scales:{
         x:{grid:{display:false}, ticks:{...AXIS_TICKS, size:11}},
@@ -432,18 +515,21 @@ function renderStakesChart(){
 }
 
 // ---------- Filters ----------
-function renderChipRow(rowId, values, active, allLabel, onPick){
+function renderChipRow(rowId, values, active, allLabel, onPick, label){
   const row = document.getElementById(rowId);
   // One value means the chips can only say "all" or the same thing twice.
   if(values.length <= 1){ row.innerHTML = ''; return; }
+  const text = v => v === 'all' ? allLabel : (label ? label(v) : v);
   row.innerHTML = ['all', ...values].map(v=>
-    `<button class="filter-chip ${v===active?'active':''}" aria-pressed="${v===active}" data-value="${escapeHtml(v)}">${v==='all'?escapeHtml(allLabel):escapeHtml(v)}</button>`
+    `<button class="filter-chip ${v===active?'active':''}" aria-pressed="${v===active}" data-value="${escapeHtml(v)}">${escapeHtml(text(v))}</button>`
   ).join('');
   row.querySelectorAll('.filter-chip').forEach(btn=>{
     btn.addEventListener('click', ()=> onPick(btn.dataset.value));
   });
 }
 
+// Chip options are derived from ALL sessions, never the filtered set —
+// otherwise choosing one value would delete every other chip and strand you.
 function renderFilters(){
   const stakes = [...new Set(sessions.map(stakesLabel))];
   const locations = [...new Set(sessions.map(s=>s.location))];
@@ -453,16 +539,32 @@ function renderFilters(){
   if(activeFilter !== 'all' && !stakes.includes(activeFilter)) activeFilter = 'all';
   if(activeLocation !== 'all' && !locations.includes(activeLocation)) activeLocation = 'all';
 
-  renderChipRow('filterRow', stakes, activeFilter, 'All Stakes',
-    v=>{ activeFilter = v; renderFilters(); renderList(); });
-  renderChipRow('locationFilterRow', locations, activeLocation, 'All Venues',
-    v=>{ activeLocation = v; renderFilters(); renderList(); });
+  // A month picked by clicking the by-month chart appears as an extra chip so
+  // there is always a visible way to see it and clear it.
+  const ranges = ['thisMonth', '90d', 'thisYear'];
+  if(/^\d{4}-\d{2}$/.test(activeRange)) ranges.push(activeRange);
+
+  renderChipRow('rangeRow', ranges, activeRange, 'All time',
+    v=>{ activeRange = v; render(); }, rangeLabel);
+  renderChipRow('filterRow', stakes, activeFilter, 'All stakes',
+    v=>{ activeFilter = v; render(); });
+  renderChipRow('locationFilterRow', locations, activeLocation, 'All venues',
+    v=>{ activeLocation = v; render(); });
+
+  const filtered = visibleSessions().length;
+  const note = document.getElementById('filterNote');
+  const on = activeFilter !== 'all' || activeLocation !== 'all' || activeRange !== 'all';
+  note.textContent = on
+    ? `Showing ${filtered} of ${sessions.length} sessions — every figure and chart below reflects this.`
+    : '';
+  note.style.display = on ? 'block' : 'none';
 }
 
 function visibleSessions(){
   return sessions
     .filter(s=> activeFilter === 'all' || stakesLabel(s) === activeFilter)
     .filter(s=> activeLocation === 'all' || s.location === activeLocation)
+    .filter(s=> matchesRange(s.date, activeRange))
     .sort((a,b)=> a.date < b.date ? 1 : a.date > b.date ? -1 : 0);   // newest first
 }
 
@@ -506,6 +608,7 @@ function renderList(){
     // Foreign sessions show the amount actually won alongside what it counts
     // for in the totals, so the arithmetic on this page is never a mystery.
     const detail = escapeHtml(stakesLabel(s))
+      + (typeof s.hours === 'number' ? dim(s.hours + 'h') : '')
       + (multiVenue ? dim(escapeHtml(s.location)) : '')
       + (s.currency === baseCurrency() ? '' : dim('≈ ' + fmt(Math.round(profitBase(s)))))
       + (s.notes ? dim(escapeHtml(s.notes)) : '');
@@ -585,7 +688,7 @@ function todayLocal(){
 }
 
 function clearFormFields(){
-  ['f-location','f-stakes','f-buyin','f-cashout','f-notes'].forEach(id=>{
+  ['f-location','f-stakes','f-buyin','f-cashout','f-hours','f-notes'].forEach(id=>{
     document.getElementById(id).value = '';
   });
   currencySelect.value = baseCurrency();
@@ -605,6 +708,7 @@ function openForm(session){
     document.getElementById('f-buyin').value = session.buyIn;
     document.getElementById('f-cashout').value = session.cashOut;
     currencySelect.value = session.currency;
+    document.getElementById('f-hours').value = session.hours ?? '';
     document.getElementById('f-notes').value = session.notes;
     updateAmountLabels();
   } else {
@@ -648,10 +752,17 @@ form.addEventListener('submit', async (e)=>{
   const buyIn = parseFloat(document.getElementById('f-buyin').value);
   const cashOut = parseFloat(document.getElementById('f-cashout').value);
   const currency = currencySelect.value;
+  // Blank stays null: "not recorded" is not the same as zero hours.
+  const rawHours = document.getElementById('f-hours').value.trim();
+  const hours = rawHours === '' ? null : parseFloat(rawHours);
   const notes = document.getElementById('f-notes').value.trim();
 
   if(!date || !location || !stakes || isNaN(buyIn) || isNaN(cashOut)){
     showFormError('Fill in date, location, stakes, buy-in, and cash-out.');
+    return;
+  }
+  if(hours !== null && (isNaN(hours) || hours <= 0)){
+    showFormError('Hours must be a positive number, or left blank if you did not record it.');
     return;
   }
   if(buyIn < 0 || cashOut < 0){
@@ -662,7 +773,7 @@ form.addEventListener('submit', async (e)=>{
   const saveBtn = document.getElementById('saveSessionBtn');
   saveBtn.disabled = true;
   try {
-    const payload = {date, location, stakes, buyIn, cashOut, currency, notes};
+    const payload = {date, location, stakes, buyIn, cashOut, currency, hours, notes};
     const ok = editingId
       ? await updateSession(editingId, payload)
       : await addSession(payload);

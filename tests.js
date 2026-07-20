@@ -173,6 +173,94 @@ check('the HKD session is converted, not counted at face value', ()=>{
   near(withHkd - withoutHkd, 78050, 'HKD contribution');
 });
 
+// ---------- hours ----------
+check('hourly rate uses only sessions that have hours', ()=>{
+  const list = [
+    {...S('2026-01-01','1/2',600), hours:3},   // +200/hr
+    {...S('2026-01-02','1/2',400), hours:2},   // +200/hr
+    S('2026-01-03','1/2',99999)                // no hours: must be excluded
+  ];
+  const st = computeStats(list);
+  eq(st.timedCount, 2, 'timedCount');
+  near(st.totalHours, 5, 'totalHours');
+  near(st.hourly, 200, 'hourly');   // 1000/5, NOT (1000+99999)/5
+});
+check('hourly is 0 when no session has hours, never NaN', ()=>{
+  const st = computeStats([S('2026-01-01','1/2',500)]);
+  eq(st.timedCount, 0); eq(st.totalHours, 0); eq(st.hourly, 0);
+});
+check('zero and negative hours are treated as not recorded', ()=>{
+  const st = computeStats([
+    {...S('2026-01-01','1/2',500), hours:0},
+    {...S('2026-01-02','1/2',500), hours:-2}
+  ]);
+  eq(st.timedCount, 0); eq(st.hourly, 0);
+});
+check('hourly converts foreign currency before dividing', ()=>{
+  const st = computeStats([{...S('2026-01-01','5/10',1000,'HKD'), hours:10}]);
+  near(st.hourly, 1115, 'hourly');   // 1000 * 11.15 / 10
+});
+
+// ---------- date ranges ----------
+const TODAY = '2026-07-20T12:00:00';
+check('all-time matches everything', ()=>{
+  eq(matchesRange('2020-01-01','all',TODAY), true);
+  eq(matchesRange('2020-01-01',null,TODAY), true);
+});
+check('thisMonth is the calendar month, not a rolling 30 days', ()=>{
+  eq(matchesRange('2026-07-01','thisMonth',TODAY), true);
+  eq(matchesRange('2026-06-30','thisMonth',TODAY), false);
+});
+check('thisYear is the calendar year', ()=>{
+  eq(matchesRange('2026-01-01','thisYear',TODAY), true);
+  eq(matchesRange('2025-12-31','thisYear',TODAY), false);
+});
+check('90d is inclusive of today and of the 90th day back', ()=>{
+  eq(matchesRange('2026-07-20','90d',TODAY), true, 'today');
+  eq(matchesRange('2026-04-22','90d',TODAY), true, '90th day back');
+  eq(matchesRange('2026-04-21','90d',TODAY), false, 'one day too early');
+});
+check('a YYYY-MM range selects exactly that month', ()=>{
+  eq(matchesRange('2026-02-15','2026-02',TODAY), true);
+  eq(matchesRange('2026-03-01','2026-02',TODAY), false);
+  eq(matchesRange('2025-02-15','2026-02',TODAY), false);
+});
+check('an unrecognised range hides nothing', ()=> eq(matchesRange('2026-01-01','nonsense',TODAY), true));
+check('rangeLabel names each range', ()=>{
+  eq(rangeLabel('all'), 'All time');
+  eq(rangeLabel('90d'), '90 days');
+  eq(rangeLabel('thisMonth'), 'This month');
+  return rangeLabel('2026-02');
+});
+
+// ---------- CSV ----------
+check('csvCell quotes only when it must', ()=>{
+  eq(csvCell('plain'), 'plain');
+  eq(csvCell('has,comma'), '"has,comma"');
+  eq(csvCell('has"quote'), '"has""quote"');
+  eq(csvCell('has\nnewline'), '"has\nnewline"');
+  eq(csvCell(null), '');
+});
+check('toCSV emits a header and one row per session', ()=>{
+  const csv = toCSV([S('2026-01-09','50/100',14150), S('2026-01-16','50/100',-30000)]);
+  const lines = csv.split('\r\n');
+  eq(lines.length, 3, 'line count');
+  eq(lines[0].startsWith('date,location,stakes'), true, 'header');
+  eq(lines[1].includes('2026-01-09'), true, 'first row is oldest');
+  eq(lines[1].endsWith('14150,14150'), true, 'profit and base profit');
+});
+check('toCSV escapes a venue containing a comma or apostrophe', ()=>{
+  const s = S('2026-01-01','1/2',100,'INR',"Pranshu's Game, Delhi");
+  const line = toCSV([s]).split('\r\n')[1];
+  eq(line.includes('"Pranshu\'s Game, Delhi"'), true, 'quoted venue');
+  eq(line.split(',').length, 11, 'comma inside quotes must not add a column');
+});
+check('toCSV converts foreign currency in the base column', ()=>{
+  const line = toCSV([S('2026-03-28','5/10',7000,'HKD','Venetian Macau')]).split('\r\n')[1];
+  eq(line.endsWith('7000,78050'), true);
+});
+check('toCSV of an empty ledger is just the header', ()=> eq(toCSV([]).split('\r\n').length, 1));
+
 // ---------- monthly ----------
 check('monthlyTotals buckets by calendar month, oldest first', ()=>{
   const m = monthlyTotals(LEDGER);

@@ -148,6 +148,14 @@ function streaks(profitsChrono){
   return { longestWin, longestLoss, currentWin: win, currentLoss: loss };
 }
 
+// Hours are optional per session. A session with no hours recorded must be
+// excluded from the rate entirely — counting it as zero hours would inflate
+// the rate, and counting its profit without its time would deflate it. So the
+// hourly figure is derived only from sessions that have both.
+function timedSessions(list){
+  return list.filter(s => typeof s.hours === 'number' && isFinite(s.hours) && s.hours > 0);
+}
+
 // Every figure returned is in the base currency.
 function computeStats(list){
   const chrono = chronological(list);
@@ -156,6 +164,10 @@ function computeStats(list){
 
   const totalProfit = profits.reduce((a,b)=>a+b, 0);
   const wins = profits.filter(p=>p>0).length;
+
+  const timed = timedSessions(chrono);
+  const totalHours = timed.reduce((a,s)=> a + s.hours, 0);
+  const timedProfit = timed.reduce((a,s)=> a + profitBase(s), 0);
 
   return {
     count:       n,
@@ -167,8 +179,66 @@ function computeStats(list){
     best:        n ? Math.max(...profits) : 0,
     worst:       n ? Math.min(...profits) : 0,
     drawdown:    drawdown(profits),
-    streaks:     streaks(profits)
+    streaks:     streaks(profits),
+    totalHours,
+    timedCount:  timed.length,      // how many sessions the rate is based on
+    hourly:      totalHours > 0 ? timedProfit / totalHours : 0
   };
+}
+
+// ---------- Date ranges ----------
+// `today` is injectable so this is testable without freezing the clock.
+function isoDate(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// A range is either a preset, 'all', or a literal 'YYYY-MM' meaning one month
+// — which is what clicking a bar on the by-month chart selects.
+function matchesRange(dateStr, range, today){
+  if(!range || range === 'all') return true;
+  if(/^\d{4}-\d{2}$/.test(range)) return dateStr.slice(0,7) === range;
+
+  const d = today ? new Date(today) : new Date();
+  if(range === 'thisMonth') return dateStr >= `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+  if(range === 'thisYear')  return dateStr >= `${d.getFullYear()}-01-01`;
+  if(range === '90d'){
+    const p = new Date(d); p.setDate(p.getDate() - 89);   // inclusive of today
+    return dateStr >= isoDate(p);
+  }
+  return true;   // unknown range never hides anything
+}
+
+function rangeLabel(range){
+  if(!range || range === 'all') return 'All time';
+  if(range === 'thisMonth') return 'This month';
+  if(range === 'thisYear')  return 'This year';
+  if(range === '90d')       return '90 days';
+  if(/^\d{4}-\d{2}$/.test(range)){
+    return new Date(range + '-01T00:00:00')
+      .toLocaleDateString(undefined,{month:'short', year:'numeric'});
+  }
+  return range;
+}
+
+// ---------- CSV ----------
+// RFC 4180: quote a field only when it contains a comma, quote or newline, and
+// escape embedded quotes by doubling them.
+function csvCell(v){
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function toCSV(list){
+  const head = ['date','location','stakes','buy_in','cash_out','currency','hours',
+                'notes','profit','profit_' + ACTIVE_BASE.toLowerCase()];
+  const rows = chronological(list).map(s => [
+    s.date, s.location, s.stakes, s.buyIn, s.cashOut, s.currency,
+    (typeof s.hours === 'number' ? s.hours : ''),
+    s.notes || '',
+    profitOf(s),
+    Math.round(profitBase(s))
+  ].map(csvCell).join(','));
+  return [head.join(','), ...rows].join('\r\n');   // CRLF per spec; Excel prefers it
 }
 
 // Profit per calendar month, oldest first, in the base currency.
