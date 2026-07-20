@@ -14,6 +14,9 @@ create table if not exists sessions (
   -- Amounts above are denominated in this currency. The app converts to
   -- BASE_CURRENCY for totals using the FX_RATES map in config.js.
   currency text not null default 'INR' check (currency ~ '^[A-Z]{3}$'),
+  -- Optional. A session without hours is excluded from the hourly rate rather
+  -- than counted as zero, so leaving this null is a legitimate choice.
+  hours numeric check (hours is null or hours > 0),
   notes text,
   created_at timestamptz not null default now()
 );

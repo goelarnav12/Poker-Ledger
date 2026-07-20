@@ -60,6 +60,15 @@
               aria-selected="false" aria-controls="panel-sessions">Sessions</button>
     </nav>
 
+    <!-- Filters sit above the panels because they apply to both: the figures
+         and charts on Overview reflect them just as the list does. -->
+    <div class="filters" id="filterBar">
+      <div class="filter-row" id="rangeRow" aria-label="Filter by date range"></div>
+      <div class="filter-row" id="filterRow" aria-label="Filter by stakes"></div>
+      <div class="filter-row" id="locationFilterRow" aria-label="Filter by venue"></div>
+      <div class="filter-note" id="filterNote"></div>
+    </div>
+
     <!-- ===== Overview: the figures and every chart ===== -->
     <section id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
 
@@ -135,6 +144,10 @@
             <!-- options are filled from FX_RATES in config.js -->
             <select id="f-currency"></select>
           </div>
+          <div class="field">
+            <label for="f-hours">Hours <span class="opt">optional</span></label>
+            <input type="number" step="0.25" min="0" id="f-hours" placeholder="4.5">
+          </div>
         </div>
         <div class="field">
           <label for="f-notes">Notes</label>
@@ -147,9 +160,6 @@
         </div>
       </form>
 
-      <div class="filter-row" id="filterRow" aria-label="Filter by stakes"></div>
-      <div class="filter-row" id="locationFilterRow" aria-label="Filter by venue"></div>
-
       <div class="form-error" id="listStatus" role="alert" aria-live="polite"></div>
       <div class="empty-note" id="loadingNote" style="display:none;">Loading…</div>
 
@@ -160,7 +170,10 @@
 
     <footer class="footer">
       <span id="userEmailLabel"></span>
-      <button class="btn-quiet" id="signOutBtn">Sign out</button>
+      <span class="footer-actions">
+        <button class="btn-quiet" id="exportBtn" title="Download every session as CSV">Export CSV</button>
+        <button class="btn-quiet" id="signOutBtn">Sign out</button>
+      </span>
     </footer>
 
   </div>
