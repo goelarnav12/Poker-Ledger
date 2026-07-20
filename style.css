@@ -1,34 +1,38 @@
 /* ---------------------------------------------------------------------------
-   Poker Ledger — editorial theme.
+   Poker Ledger — editorial theme, after dark.
 
-   Rules instead of boxes, figures right-aligned in a column, two type families.
-   The only colour that carries meaning is win/loss on an amount; everything
-   else is ink on paper. If you add a component, resist giving it a border and
-   a background — spacing and a hairline rule are the grammar here.
+   Rules and whitespace instead of cards and borders, two type families, warm
+   near-black ground with cream ink. The only colour that carries meaning is
+   win/loss on an amount; everything else is ink on ground. If you add a
+   component, resist giving it a border and a background — spacing and a
+   hairline rule are the grammar here.
+
+   Dark only by design: there is no light variant and no toggle.
    --------------------------------------------------------------------------- */
 
 :root{
-  --paper:      #F7F4EC;
-  --paper-sunk: #EFEADE;
-  --ink:        #1C1A15;
-  --ink-soft:   #4A453B;
+  --ground:     #16150F;
+  --ground-up:  #1E1C15;   /* hover / recessed fills, one step lighter */
+  --text:       #EDE7D9;
+  --text-soft:  #BDB7A8;
   --muted:      #8A8375;
-  --rule:       #DCD5C6;
-  --rule-soft:  #E8E2D5;
-  --win:        #1F6B4A;
-  --loss:       #A33A2C;
+  --rule:       #2E2B22;
+  --rule-soft:  #24221B;
+  --win:        #5FA97E;
+  --loss:       #D4695A;
 
   --serif: 'Fraunces', Georgia, serif;
   --mono:  'IBM Plex Mono', ui-monospace, monospace;
 }
 
 *{ box-sizing:border-box; }
+[hidden]{ display:none !important; }
 
 body{
   margin:0;
   padding:0 0 72px;
-  background:var(--paper);
-  color:var(--ink);
+  background:var(--ground);
+  color:var(--text);
   font-family:var(--mono);
   font-size:14px;
   line-height:1.5;
@@ -39,12 +43,10 @@ body{
 .wrap{ max-width:760px; margin:0 auto; padding:0 24px; }
 
 /* Every figure in the app is tabular so columns line up. */
-.figure, .summary .value, .session .amount, .stat-inline b{
-  font-variant-numeric:tabular-nums;
-}
+.summary .value, .session .amount{ font-variant-numeric:tabular-nums; }
 
 /* ---------- Masthead ---------- */
-.masthead{ padding:56px 0 28px; }
+.masthead{ padding:56px 0 22px; }
 h1{
   font-family:var(--serif);
   font-weight:600;
@@ -61,12 +63,32 @@ h1{
   margin-top:10px;
 }
 
+/* ---------- Tabs ---------- */
+.tabs{
+  display:flex;
+  gap:26px;
+  border-bottom:1px solid var(--rule);
+  margin-bottom:30px;
+}
+.tab{
+  background:none; border:0; cursor:pointer;
+  padding:11px 0;
+  font-family:var(--mono); font-size:11.5px;
+  letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--muted);
+  border-bottom:2px solid transparent;
+  margin-bottom:-1px;              /* sit the underline on the rule */
+}
+.tab:hover{ color:var(--text-soft); }
+.tab[aria-selected="true"]{ color:var(--text); border-bottom-color:var(--text); }
+
 /* ---------- Section headings: a label sitting on a rule ---------- */
 .rule-title{
   display:flex;
-  align-items:baseline;
+  align-items:center;
   justify-content:space-between;
   gap:16px;
+  min-height:34px;
   font-size:11px;
   letter-spacing:0.16em;
   text-transform:uppercase;
@@ -78,7 +100,7 @@ h1{
 .counter{ letter-spacing:0.08em; text-transform:none; }
 
 /* ---------- Summary ledger ---------- */
-.summary{ margin:8px 0 44px; }
+.summary{ margin:0 0 44px; }
 .summary .row{
   display:flex;
   align-items:baseline;
@@ -108,11 +130,11 @@ h1{
 
 /* The headline figure gets scale, not colour-as-decoration. */
 .summary .row.headline{
-  padding:4px 0 16px;
+  padding:2px 0 16px;
   border-bottom:1px solid var(--rule);
   margin-bottom:6px;
 }
-.summary .row.headline .label{ font-size:13px; color:var(--ink-soft); }
+.summary .row.headline .label{ font-size:13px; color:var(--text-soft); }
 .summary .row.headline .value{ font-size:38px; font-weight:600; letter-spacing:-0.015em; }
 
 .pos{ color:var(--win); }
@@ -126,8 +148,6 @@ h1{
 .chart-pair{ display:grid; grid-template-columns:1fr 1fr; gap:36px; }
 
 /* ---------- Sessions ---------- */
-.sessions-block{ margin-top:8px; }
-
 .session{
   display:grid;
   grid-template-columns:62px 1fr auto auto auto;
@@ -136,9 +156,9 @@ h1{
   padding:11px 2px;
   border-bottom:1px solid var(--rule-soft);
 }
-.session:hover{ background:var(--paper-sunk); }
+.session:hover{ background:var(--ground-up); }
 .session .date{ font-size:12px; color:var(--muted); white-space:nowrap; }
-.session .detail{ font-size:12.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session .detail{ font-size:12.5px; color:var(--text-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .session .detail .dim{ color:var(--muted); }
 .session .amount{
   font-family:var(--serif);
@@ -147,8 +167,8 @@ h1{
   white-space:nowrap;
 }
 
-/* Row controls stay invisible until the row is touched — 36 rows of icons is
-   noise, and the actions are secondary to reading the figures. */
+/* Row controls stay invisible until the row is touched — 36 rows of controls
+   is noise, and the actions are secondary to reading the figures. */
 .session .edit, .session .del{
   background:none; border:0; padding:2px 5px; cursor:pointer;
   color:var(--muted); font-family:var(--mono); font-size:12px;
@@ -157,7 +177,7 @@ h1{
 .session:hover .edit, .session:hover .del,
 .session .edit:focus-visible, .session .del:focus-visible,
 .session .del.armed{ opacity:1; }
-.session .edit:hover{ color:var(--ink); }
+.session .edit:hover{ color:var(--text); }
 .session .del:hover{ color:var(--loss); }
 .session .del.armed{ color:var(--loss); font-weight:600; }
 .session .del:disabled{ opacity:.4; cursor:default; }
@@ -172,9 +192,9 @@ h1{
   background:none; border:1px solid transparent; border-radius:3px;
   color:var(--muted);
 }
-.filter-chip:hover{ color:var(--ink); }
+.filter-chip:hover{ color:var(--text); }
 .filter-chip.active{
-  color:var(--ink); border-color:var(--rule); background:var(--paper-sunk);
+  color:var(--text); border-color:var(--rule); background:var(--ground-up);
 }
 
 /* ---------- Forms ---------- */
@@ -190,31 +210,34 @@ h1{
 }
 /* Underlines, not boxes. */
 .field input, .field select{
-  width:100%; background:transparent; color:var(--ink);
+  width:100%; background:transparent; color:var(--text);
   font-family:var(--mono); font-size:14px;
   border:0; border-bottom:1px solid var(--rule);
   padding:6px 2px; border-radius:0;
 }
-.field input:focus, .field select:focus{ outline:none; border-bottom-color:var(--ink); }
-.field input::placeholder{ color:#B5AE9E; }
+.field input:focus, .field select:focus{ outline:none; border-bottom-color:var(--text); }
+.field input::placeholder{ color:#5C574B; }
+/* The native date/time picker icon is black-on-black without this. */
+.field input[type="date"]::-webkit-calendar-picker-indicator{ filter:invert(0.75); cursor:pointer; }
+.field select option{ background:var(--ground); color:var(--text); }
 
 .form-actions{ display:flex; gap:10px; justify-content:flex-end; align-items:center; }
 
 .btn-primary{
   font-family:var(--mono); font-size:12px; font-weight:600;
   letter-spacing:0.04em; cursor:pointer;
-  background:var(--ink); color:var(--paper);
-  border:1px solid var(--ink); border-radius:3px; padding:8px 16px;
+  background:var(--text); color:var(--ground);
+  border:1px solid var(--text); border-radius:3px; padding:8px 16px;
 }
-.btn-primary:hover{ background:#000; }
+.btn-primary:hover{ background:#fff; border-color:#fff; }
 .btn-quiet{
   font-family:var(--mono); font-size:12px; cursor:pointer;
   background:none; color:var(--muted);
   border:1px solid var(--rule); border-radius:3px; padding:8px 14px;
 }
-.btn-quiet:hover{ color:var(--ink); border-color:var(--muted); }
+.btn-quiet:hover{ color:var(--text); border-color:var(--muted); }
 
-:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+:focus-visible{ outline:2px solid var(--text); outline-offset:2px; }
 
 /* ---------- Auth ---------- */
 .auth-view{ display:flex; justify-content:center; padding:24px 0 60px; }
@@ -232,8 +255,8 @@ h1{
   border-left:2px solid var(--loss);
   padding:8px 12px; margin-bottom:16px;
 }
-.notice{ display:block; color:var(--ink-soft); }
-.notice code{ background:var(--paper-sunk); padding:1px 5px; border-radius:3px; }
+.notice{ display:block; color:var(--text-soft); }
+.notice code{ background:var(--ground-up); padding:1px 5px; border-radius:3px; }
 .empty-note{ font-size:12px; color:var(--muted); text-align:center; padding:36px 0; }
 
 /* ---------- Footer ---------- */
@@ -247,13 +270,12 @@ h1{
 /* ---------- Narrow ---------- */
 @media (max-width:640px){
   .wrap{ padding:0 18px; }
-  .masthead{ padding:36px 0 22px; }
+  .masthead{ padding:36px 0 18px; }
   h1{ font-size:30px; }
   .summary .row.headline .value{ font-size:30px; }
   .chart-pair{ grid-template-columns:1fr; gap:32px; }
 
-  /* Date and figure on one line, detail beneath — the leader column has no
-     room to be useful at this width. */
+  /* Date and figure on one line, detail and controls beneath. */
   .session{ grid-template-columns:1fr auto auto; row-gap:4px; gap:10px; }
   .session .date{ grid-column:1; grid-row:1; }
   .session .amount{ grid-column:2/4; grid-row:1; text-align:right; }

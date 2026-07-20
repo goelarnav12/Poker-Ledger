@@ -64,6 +64,7 @@ async function enterApp(){
   authView.style.display = 'none';
   appView.style.display = 'block';
   userEmailLabel.textContent = currentUser.email;
+  showTab(location.hash.slice(1));   // restore the tab from the URL
   await loadSessions();
 }
 
@@ -214,6 +215,30 @@ async function deleteSession(id){
   return true;
 }
 
+// ---------- Tabs ----------
+// Two views: the figures and charts on Overview, the log on Sessions. The
+// active tab lives in the URL hash so a refresh keeps you where you were.
+const TABS = ['overview', 'sessions'];
+
+function showTab(name){
+  if(!TABS.includes(name)) name = 'overview';
+  TABS.forEach(t=>{
+    document.getElementById('panel-' + t).hidden = (t !== name);
+    document.getElementById('tab-' + t).setAttribute('aria-selected', String(t === name));
+  });
+  if(location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+
+  // Chart.js measures its container at construction time. Anything built while
+  // the Overview panel was hidden comes out zero-width, so rebuild on reveal —
+  // cheap at this data volume, and always correct.
+  if(name === 'overview'){ renderChart(); renderMonthlyChart(); renderStakesChart(); }
+}
+
+document.querySelectorAll('.tab').forEach(btn=>{
+  btn.addEventListener('click', ()=> showTab(btn.dataset.tab));
+});
+window.addEventListener('hashchange', ()=> showTab(location.hash.slice(1)));
+
 // ---------- Render ----------
 function render(){
   const st = computeStats(sessions);
@@ -292,10 +317,10 @@ function fillDatalist(id, values){
 }
 
 // Shared Chart.js styling so the three charts stay visually consistent.
-// Ink on paper. Keep these in step with the custom properties in style.css.
-const INK = '#1C1A15', WIN = 'rgba(31,107,74,0.8)', LOSS = 'rgba(163,58,44,0.8)';
+// Cream on warm charcoal. Keep in step with the custom properties in style.css.
+const INK = '#EDE7D9', WIN = 'rgba(95,169,126,0.85)', LOSS = 'rgba(212,105,90,0.85)';
 const AXIS_TICKS = {color:'#8A8375', font:{family:'IBM Plex Mono', size:10}};
-const GRID = {color:'#E8E2D5', drawTicks:false};
+const GRID = {color:'#2E2B22', drawTicks:false};
 const MONEY_TOOLTIP = {callbacks:{label: c=>fmt(Math.round(c.parsed.y))}};
 
 // All three chart renderers follow the same shape: hide the panel when there is
@@ -319,7 +344,7 @@ function renderChart(){
     data:{ datasets:[{
       data: points,
       borderColor: INK,
-      backgroundColor:'rgba(28,26,21,0.05)',
+      backgroundColor:'rgba(237,231,217,0.06)',
       fill:true,
       tension:0.2,
       // No permanent dots: 36 of them turn a line into a dotted mess. They
@@ -446,6 +471,13 @@ function renderList(){
   const list = document.getElementById('sessionList');
   const empty = document.getElementById('emptyNote');
   const filtered = visibleSessions();
+
+  // The tab already says "Sessions", so this heading carries the count — and
+  // says so explicitly when a filter is hiding some of them.
+  document.getElementById('sessionsHeading').textContent =
+    filtered.length === sessions.length
+      ? `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`
+      : `${filtered.length} of ${sessions.length}`;
 
   if(filtered.length === 0){
     list.innerHTML = '';
