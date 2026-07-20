@@ -138,6 +138,9 @@ function setLoading(on){
 async function loadSessions(){
   setLoading(true);
   try {
+    // Supabase reports most failures as { error }, but a genuine network
+    // failure (offline, DNS, CORS) throws instead. Without this catch that
+    // rejection escapes and the user is left staring at an empty page.
     const { data, error } = await client
       .from('sessions')
       .select('*')
@@ -160,6 +163,10 @@ async function loadSessions(){
         notes: r.notes || ''
       }));
     }
+  } catch(e){
+    console.error(e);
+    sessions = [];
+    showListStatus('Could not reach the database. Check your connection, then reload.');
   } finally {
     setLoading(false);
   }
@@ -278,7 +285,15 @@ const AXIS_TICKS = {color:'#C9BFA9', font:{family:'IBM Plex Mono', size:10}};
 const GRID = {color:'rgba(243,234,216,0.06)'};
 const MONEY_TOOLTIP = {callbacks:{label: c=>fmt(Math.round(c.parsed.y))}};
 
+// All three chart renderers follow the same shape: hide the panel when there is
+// nothing to plot, and always tear the old Chart.js instance down first — an
+// undestroyed instance keeps its canvas binding and leaks.
 function renderChart(){
+  const has = sessions.length > 0;
+  document.getElementById('profitPanel').style.display = has ? 'block' : 'none';
+  if(profitChart){ profitChart.destroy(); profitChart = null; }
+  if(!has) return;
+
   const ctx = document.getElementById('profitChart');
   let running = 0;
   const points = chronological(sessions).map(s=>{
@@ -286,7 +301,6 @@ function renderChart(){
     return {x: s.date, y: running};
   });
 
-  if(profitChart) profitChart.destroy();
   profitChart = new Chart(ctx, {
     type:'line',
     data:{ datasets:[{
@@ -312,14 +326,14 @@ function renderChart(){
 }
 
 function renderMonthlyChart(){
-  const panel = document.getElementById('monthlyPanel');
   const buckets = monthlyTotals(sessions);
-  if(buckets.length === 0){ panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
+  const has = buckets.length > 0;
+  document.getElementById('monthlyPanel').style.display = has ? 'block' : 'none';
+  if(monthlyChart){ monthlyChart.destroy(); monthlyChart = null; }
+  if(!has) return;
 
   const data = buckets.map(b=>b.total);
   const ctx = document.getElementById('monthlyChart');
-  if(monthlyChart) monthlyChart.destroy();
   monthlyChart = new Chart(ctx, {
     type:'bar',
     data:{ labels: buckets.map(b=>b.label), datasets:[{
@@ -340,9 +354,10 @@ function renderMonthlyChart(){
 }
 
 function renderStakesChart(){
-  const panel = document.getElementById('stakesPanel');
-  if(sessions.length === 0){ panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
+  const has = sessions.length > 0;
+  document.getElementById('stakesPanel').style.display = has ? 'block' : 'none';
+  if(stakesChart){ stakesChart.destroy(); stakesChart = null; }
+  if(!has) return;
 
   const byStakes = {};
   sessions.forEach(s=>{
@@ -353,7 +368,6 @@ function renderStakesChart(){
   const data = Object.values(byStakes);
 
   const ctx = document.getElementById('stakesChart');
-  if(stakesChart) stakesChart.destroy();
   stakesChart = new Chart(ctx, {
     type:'bar',
     data:{ labels, datasets:[{
