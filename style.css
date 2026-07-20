@@ -30,7 +30,10 @@
 
 body{
   margin:0;
-  padding:0 0 72px;
+  /* Installed on a phone the page paints edge to edge (viewport-fit=cover), so
+     the home indicator would otherwise sit on top of the footer. */
+  padding:env(safe-area-inset-top) env(safe-area-inset-right)
+          calc(72px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
   background:var(--ground);
   color:var(--text);
   font-family:var(--mono);
@@ -285,7 +288,12 @@ h1{
 /* ---------- Narrow ---------- */
 @media (max-width:640px){
   .wrap{ padding:0 18px; }
+  /* Standalone has no browser chrome, so the masthead needs its own breathing
+     room under the status bar. */
   .masthead{ padding:36px 0 18px; }
+  @media (display-mode:standalone){
+    .masthead{ padding-top:20px; }
+  }
   h1{ font-size:30px; }
   .summary .row.headline .value{ font-size:30px; }
   .chart-pair{ grid-template-columns:1fr; gap:32px; }

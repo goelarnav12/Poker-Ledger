@@ -1,0 +1,16 @@
+{
+  "name": "Poker Ledger",
+  "short_name": "Poker Ledger",
+  "description": "Cash game session tracker.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16150F",
+  "theme_color": "#16150F",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
