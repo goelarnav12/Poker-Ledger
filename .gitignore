@@ -8,3 +8,5 @@
 
 # Logs and local scratch
 *.log
+.vercel
+.env*

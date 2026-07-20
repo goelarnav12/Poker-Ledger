@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Poker Ledger">
+  <!-- Full-bleed ground so this also works as a maskable icon: the chip sits
+       well inside the 80% safe circle Android may crop to. -->
+  <rect width="512" height="512" fill="#16150F"/>
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#EDE7D9" stroke-width="34"/>
+  <circle cx="256" cy="256" r="46" fill="#EDE7D9"/>
+</svg>
