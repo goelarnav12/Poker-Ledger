@@ -53,6 +53,15 @@ check('fmt renders base currency', ()=>{
 });
 check('fmt renders a foreign currency', ()=> eq(fmt(7000,'HKD'), 'HK$7,000'));
 check('fmt falls back to the code for an unknown symbol', ()=> eq(fmt(5,'XYZ'), 'XYZ 5'));
+check('fmtSigned always carries a sign', ()=>{
+  eq(fmtSigned(47500), '+₹47,500');
+  eq(fmtSigned(-10000), '−₹10,000');   // true minus, not hyphen
+  eq(fmtSigned(0), '₹0');                  // zero is unsigned
+  eq(fmtSigned(7000,'HKD'), '+HK$7,000');
+});
+check('fmtSigned uses U+2212 so columns align', ()=>{
+  if(fmtSigned(-1).includes('-')) throw new Error('used ASCII hyphen, not U+2212');
+});
 check('fmtAxis compacts thousands', ()=>{
   eq(fmtAxis(163350), '₹163.4k');
   eq(fmtAxis(-30000), '-₹30k');

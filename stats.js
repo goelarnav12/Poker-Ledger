@@ -59,6 +59,15 @@ function fmt(n, cur){
     Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0});
 }
 
+// Ledger style: every amount carries an explicit sign, so a column of figures
+// reads as credits and debits. Uses a true minus (U+2212), which is the same
+// width as + in tabular figures — a hyphen is narrower and breaks alignment.
+function fmtSigned(n, cur){
+  if(n === 0) return fmt(0, cur);
+  return (n > 0 ? '+' : '−') + symbolFor(cur || ACTIVE_BASE) +
+    Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0});
+}
+
 // Axis labels: ₹163,350 is too wide for a tick, so compact to ₹163.4k.
 // Math.round rather than toFixed(1): 163350/1000 is stored a hair under
 // 163.35, so toFixed would round it *down* to 163.3.
