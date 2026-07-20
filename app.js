@@ -15,7 +15,6 @@ let profitChart, stakesChart, monthlyChart;
 
 const authView = document.getElementById('authView');
 const appView = document.getElementById('app');
-const bankrollBlock = document.getElementById('bankrollBlock');
 const authError = document.getElementById('authError');
 const userEmailLabel = document.getElementById('userEmailLabel');
 const configWarning = document.getElementById('configWarning');
@@ -56,7 +55,6 @@ async function boot(){
       activeLocation = 'all';
       closeForm();
       appView.style.display = 'none';
-      bankrollBlock.style.display = 'none';
       authView.style.display = 'flex';
     }
   });
@@ -65,7 +63,6 @@ async function boot(){
 async function enterApp(){
   authView.style.display = 'none';
   appView.style.display = 'block';
-  bankrollBlock.style.display = 'block';
   userEmailLabel.textContent = currentUser.email;
   await loadSessions();
 }
@@ -75,7 +72,7 @@ async function enterApp(){
 // auth buttons have to survive being clicked with no client.
 function requireClient(){
   if(client) return true;
-  authError.style.color = 'var(--crimson)';
+  authError.style.color = 'var(--loss)';
   authError.textContent = 'Supabase is not configured yet — fill in config.js.';
   return false;
 }
@@ -84,16 +81,16 @@ document.getElementById('signUpBtn').addEventListener('click', async ()=>{
   if(!requireClient()) return;
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
-  authError.style.color = 'var(--gold-bright)';
+  authError.style.color = 'var(--ink-soft)';
   authError.textContent = '';
   if(!email || password.length < 6){
-    authError.style.color = 'var(--crimson)';
+    authError.style.color = 'var(--loss)';
     authError.textContent = 'Enter an email and a password of at least 6 characters.';
     return;
   }
   const { data, error } = await client.auth.signUp({ email, password });
   if(error){
-    authError.style.color = 'var(--crimson)';
+    authError.style.color = 'var(--loss)';
     authError.textContent = error.message;
     return;
   }
@@ -106,7 +103,7 @@ document.getElementById('signInBtn').addEventListener('click', async ()=>{
   if(!requireClient()) return;
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
-  authError.style.color = 'var(--crimson)';
+  authError.style.color = 'var(--loss)';
   authError.textContent = '';
   const { error } = await client.auth.signInWithPassword({ email, password });
   if(error){ authError.textContent = error.message; }
@@ -221,10 +218,7 @@ async function deleteSession(id){
 function render(){
   const st = computeStats(sessions);
 
-  const bkEl = document.getElementById('bankrollNum');
-  bkEl.textContent = fmt(st.totalProfit);
-  bkEl.className = 'num ' + resultClass(st.totalProfit);
-
+  renderStrap();
   renderStats(st);
   document.getElementById('sessionCount').textContent =
     sessions.length + (sessions.length === 1 ? ' session' : ' sessions');
@@ -237,32 +231,49 @@ function render(){
   renderDatalists();
 }
 
-function statTile(k, v, cls, title){
-  return `<div class="stat"${title ? ` title="${escapeHtml(title)}"` : ''}>
-    <div class="k">${escapeHtml(k)}</div><div class="v ${cls||''}">${v}</div></div>`;
+// The strap under the masthead carries the period the ledger covers.
+function renderStrap(){
+  const el = document.getElementById('strap');
+  if(!sessions.length){ el.textContent = 'cash game record'; return; }
+  const c = chronological(sessions);
+  const month = d => new Date(d+'T00:00:00')
+    .toLocaleDateString(undefined,{month:'short', year:'numeric'});
+  const from = month(c[0].date), to = month(c[c.length-1].date);
+  el.textContent = 'cash game record · ' + (from === to ? from : `${from} – ${to}`);
+}
+
+// Label on the left, figure on the right, dot leaders between — a printed
+// table, not a grid of cards. Median and standard deviation are deliberately
+// not shown; stats.js still computes them if they're ever wanted back.
+function summaryRow(label, value, cls, extra, title){
+  return `<div class="row${extra || ''}"${title ? ` title="${escapeHtml(title)}"` : ''}>
+    <span class="label">${escapeHtml(label)}</span>
+    <span class="leader"></span>
+    <span class="value ${cls || ''}">${value}</span>
+  </div>`;
 }
 
 function renderStats(st){
   const any = st.count > 0;
   const dash = '—';
   document.getElementById('statsRow').innerHTML = [
-    statTile('Win Rate', any ? st.winRate.toFixed(0)+'%' : dash),
-    statTile('Sessions', String(st.count)),
-    statTile('Avg / Session', any ? fmt(Math.round(st.avg)) : dash, resultClass(st.avg),
-             'Mean profit per session'),
-    statTile('Median', any ? fmt(Math.round(st.median)) : dash, resultClass(st.median),
-             'The middle session. A median well below the mean means a few big wins are carrying the average.'),
-    statTile('Std Deviation', any ? fmt(Math.round(st.stdDev)) : dash, '',
-             'How spread out your results are, session to session.'),
-    statTile('Best Session', any ? fmt(st.best) : dash, resultClass(st.best)),
-    statTile('Worst Session', any ? fmt(st.worst) : dash, resultClass(st.worst)),
-    statTile('Max Drawdown', any ? fmt(Math.round(st.drawdown.max)) : dash,
-             st.drawdown.max > 0 ? 'neg' : '',
-             `Largest peak-to-trough fall in the running bankroll. Currently ${fmt(Math.round(st.drawdown.current))} below the all-time peak.`),
-    statTile('Longest Win Streak', any ? String(st.streaks.longestWin) : dash, '',
-             `Current run: ${st.streaks.currentWin} winning session(s).`),
-    statTile('Longest Loss Streak', any ? String(st.streaks.longestLoss) : dash, '',
-             `Current run: ${st.streaks.currentLoss} losing session(s).`)
+    // The headline stays unsigned — its size and colour already say which way
+    // it went, and a "+" on the hero figure reads as clutter.
+    summaryRow('Net profit', any ? fmt(Math.round(st.totalProfit)) : dash,
+               resultClass(st.totalProfit), ' headline'),
+    summaryRow('Sessions', String(st.count)),
+    summaryRow('Win rate', any ? st.winRate.toFixed(0) + '%' : dash),
+    summaryRow('Average / session', any ? fmtSigned(Math.round(st.avg)) : dash,
+               resultClass(st.avg)),
+    summaryRow('Best session', any ? fmtSigned(st.best) : dash, resultClass(st.best)),
+    summaryRow('Worst session', any ? fmtSigned(st.worst) : dash, resultClass(st.worst)),
+    summaryRow('Max drawdown', any ? fmt(Math.round(st.drawdown.max)) : dash,
+               st.drawdown.max > 0 ? 'neg' : '', '',
+               any ? `Largest peak-to-trough fall. Currently ${fmt(Math.round(st.drawdown.current))} below the all-time peak.` : ''),
+    summaryRow('Longest win streak', any ? String(st.streaks.longestWin) : dash, '', '',
+               any ? `Current run: ${st.streaks.currentWin}.` : ''),
+    summaryRow('Longest loss streak', any ? String(st.streaks.longestLoss) : dash, '', '',
+               any ? `Current run: ${st.streaks.currentLoss}.` : '')
   ].join('');
 }
 
@@ -281,8 +292,10 @@ function fillDatalist(id, values){
 }
 
 // Shared Chart.js styling so the three charts stay visually consistent.
-const AXIS_TICKS = {color:'#C9BFA9', font:{family:'IBM Plex Mono', size:10}};
-const GRID = {color:'rgba(243,234,216,0.06)'};
+// Ink on paper. Keep these in step with the custom properties in style.css.
+const INK = '#1C1A15', WIN = 'rgba(31,107,74,0.8)', LOSS = 'rgba(163,58,44,0.8)';
+const AXIS_TICKS = {color:'#8A8375', font:{family:'IBM Plex Mono', size:10}};
+const GRID = {color:'#E8E2D5', drawTicks:false};
 const MONEY_TOOLTIP = {callbacks:{label: c=>fmt(Math.round(c.parsed.y))}};
 
 // All three chart renderers follow the same shape: hide the panel when there is
@@ -305,20 +318,26 @@ function renderChart(){
     type:'line',
     data:{ datasets:[{
       data: points,
-      borderColor:'#E0BC3E',
-      backgroundColor:'rgba(201,162,39,0.12)',
+      borderColor: INK,
+      backgroundColor:'rgba(28,26,21,0.05)',
       fill:true,
-      tension:0.25,
-      pointRadius:3,
-      pointBackgroundColor:'#E0BC3E',
-      borderWidth:2
+      tension:0.2,
+      // No permanent dots: 36 of them turn a line into a dotted mess. They
+      // appear on hover, where they actually help you read a value.
+      pointRadius:0,
+      pointHoverRadius:4,
+      pointHoverBackgroundColor: INK,
+      borderWidth:1.5
     }]},
     options:{
       responsive:true,
       maintainAspectRatio:false,
       plugins:{ legend:{display:false}, tooltip:MONEY_TOOLTIP },
       scales:{
-        x:{type:'time', time:{unit:'day'}, grid:GRID, ticks:AXIS_TICKS},
+        // No vertical rules, and let Chart.js thin the date labels rather than
+        // printing one per day — on paper a tick per session is a picket fence.
+        x:{type:'time', time:{unit:'month'}, grid:{display:false},
+           ticks:{...AXIS_TICKS, autoSkip:true, maxRotation:0}},
         y:{grid:GRID, ticks:{...AXIS_TICKS, callback:fmtAxis}}
       }
     }
@@ -338,8 +357,8 @@ function renderMonthlyChart(){
     type:'bar',
     data:{ labels: buckets.map(b=>b.label), datasets:[{
       data,
-      backgroundColor: data.map(v=> v>=0 ? 'rgba(224,188,62,0.75)' : 'rgba(168,50,74,0.75)'),
-      borderRadius:5
+      backgroundColor: data.map(v=> v>=0 ? WIN : LOSS),
+      borderRadius:2
     }]},
     options:{
       responsive:true,
@@ -372,8 +391,8 @@ function renderStakesChart(){
     type:'bar',
     data:{ labels, datasets:[{
       data,
-      backgroundColor: data.map(v=> v>=0 ? 'rgba(224,188,62,0.75)' : 'rgba(168,50,74,0.75)'),
-      borderRadius:5
+      backgroundColor: data.map(v=> v>=0 ? WIN : LOSS),
+      borderRadius:2
     }]},
     options:{
       responsive:true,
@@ -438,26 +457,35 @@ function renderList(){
   }
   empty.style.display = 'none';
 
+  // Only qualify what varies. Printing the same venue on all 36 rows makes the
+  // least informative column the most visually dominant one; the year is the
+  // same idea. Both appear only once the ledger actually spans more than one.
+  const multiVenue = new Set(sessions.map(s=>s.location)).size > 1;
+  const multiYear  = new Set(sessions.map(s=>s.date.slice(0,4))).size > 1;
+
   list.innerHTML = filtered.map(s=>{
     const profit = profitOf(s);
-    const cls = profit>0?'win':profit<0?'loss':'';
-    const dateStr = new Date(s.date+'T00:00:00')
-      .toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    const d = new Date(s.date + 'T00:00:00');
+    const dateStr = d.toLocaleDateString(undefined,
+      multiYear ? {day:'numeric',month:'short',year:'2-digit'} : {day:'numeric',month:'short'});
+    const fullDate = d.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'});
+
+    const dim = t => `<span class="dim"> · ${t}</span>`;
     // Foreign sessions show the amount actually won alongside what it counts
     // for in the totals, so the arithmetic on this page is never a mystery.
-    const converted = s.currency === baseCurrency()
-      ? '' : ' · ≈ ' + fmt(Math.round(profitBase(s)));
-    const what = `${s.location} on ${dateStr}`;
+    const detail = escapeHtml(stakesLabel(s))
+      + (multiVenue ? dim(escapeHtml(s.location)) : '')
+      + (s.currency === baseCurrency() ? '' : dim('≈ ' + fmt(Math.round(profitBase(s)))))
+      + (s.notes ? dim(escapeHtml(s.notes)) : '');
+
+    const what = `${s.location} on ${fullDate}`;
     return `
-      <div class="session ${cls}" data-id="${escapeHtml(s.id)}">
-        <div class="date">${dateStr}</div>
-        <div class="meta">
-          <div class="loc">${escapeHtml(s.location)}</div>
-          <div class="sub">${escapeHtml(stakesLabel(s))}${converted}${s.notes ? ' · '+escapeHtml(s.notes) : ''}</div>
-        </div>
-        <div class="result ${resultClass(profit)}">${fmt(profit, s.currency)}</div>
-        <button class="edit" data-act="edit" title="Edit session" aria-label="Edit session at ${escapeHtml(what)}">✎</button>
-        <button class="del" data-act="del" title="Delete session" aria-label="Delete session at ${escapeHtml(what)}">✕</button>
+      <div class="session" data-id="${escapeHtml(s.id)}">
+        <span class="date">${escapeHtml(dateStr)}</span>
+        <span class="detail" title="${escapeHtml(s.location)}">${detail}</span>
+        <span class="amount ${resultClass(profit)}">${fmtSigned(profit, s.currency)}</span>
+        <button class="edit" data-act="edit" aria-label="Edit session at ${escapeHtml(what)}">edit</button>
+        <button class="del" data-act="del" aria-label="Delete session at ${escapeHtml(what)}">del</button>
       </div>
     `;
   }).join('');
@@ -478,11 +506,11 @@ function renderList(){
     btn.addEventListener('click', async ()=>{
       if(btn.dataset.armed !== '1'){
         btn.dataset.armed = '1';
-        btn.textContent = 'Sure?';
+        btn.textContent = 'sure?';
         btn.classList.add('armed');
         armTimer = setTimeout(()=>{
           btn.dataset.armed = '0';
-          btn.textContent = '✕';
+          btn.textContent = 'del';
           btn.classList.remove('armed');
         }, 4000);
         return;
