@@ -1,9 +1,14 @@
 # The Ledger — Poker Session Tracker
 
-A standalone website for tracking cash game sessions: profit and loss per
-session, a cumulative bankroll chart, monthly and per-stakes breakdowns, and
-distribution stats (median, standard deviation, max drawdown, streaks).
+A standalone website for tracking cash games and tournaments: profit and loss
+per session, a cumulative bankroll chart, monthly and per-stakes breakdowns,
+and distribution stats (median, standard deviation, max drawdown, streaks).
 Sessions can be recorded in multiple currencies and are totalled in one.
+
+Cash games and tournaments share **one bankroll** — net profit and the
+cumulative chart cover both — but are **analysed separately**, because a
+tournament has no bb/100 and a cash game has no ROI. See
+[Formats](#formats) below.
 
 Your data lives in your own free Supabase database behind your own login, so it
 follows you across devices and nobody else can read it.
@@ -59,6 +64,19 @@ Rates are static, not live. Changing one restates every past session in that
 currency — fine for a ledger you read in one denomination, but be aware the
 historical numbers move.
 
+Also in `config.js`:
+
+```js
+const HANDS_PER_HOUR = 30;
+```
+
+bb/100 is a rate per hundred hands, but a live ledger records hours — nobody
+counts hands at the table. Hands are estimated as `hours × HANDS_PER_HOUR`, so
+that figure is only ever as good as this number. 30 is the usual live full-ring
+rate; 6-max or a fast dealer runs 35–40. Changing it rescales bb/100 for every
+past session and changes **no money figure**, which is measured rather than
+estimated.
+
 ### 4. Create your login
 
 Serve the folder and sign up:
@@ -73,6 +91,66 @@ sends, or turn it off under **Authentication → Sign In / Providers → Email**
 If you are hosting the site anywhere other than localhost, set
 **Authentication → URL Configuration → Site URL** to that address first, or
 the confirmation link will point at localhost and fail.
+
+---
+
+## Formats
+
+The **Type** picker on the session form switches between a cash game and a
+tournament. It rewrites the labels around it, because the same columns mean
+different things:
+
+| Field | Cash game | Tournament |
+|---|---|---|
+| Stakes | the blind level, `50/100` | the event name, `Sunday Main` |
+| Buy-in | what you sat down with | the prize-pool portion of **one** entry |
+| Fee | — | the rake on **one** entry |
+| Entries | — | 1 for a freezeout, 2+ if you re-entered |
+| Cash-out | what you left with | total winnings, 0 if you busted |
+| Finish / Field | — | optional, for the best-finish figure |
+
+So a tournament costs `(buy-in + fee) × entries`, which is why profit is no
+longer simply cash-out minus buy-in. That arithmetic lives in exactly one
+place, `totalCost()` in `stats.js`, and everything downstream inherits it.
+
+**What each format gets you.** Above the first divider, every figure counts
+every session — one bankroll. Below it:
+
+- **Cash games** — bb/100 with a confidence interval, hourly rate, hours.
+- **Tournaments** — ROI, in-the-money rate, buy-ins, winnings, best finish.
+
+The hourly rate is deliberately cash-only. A tournament's length is set by the
+structure rather than by you, so money-per-hour says more about the blind
+levels than about how you played; ROI is the figure that means something.
+
+### bb/100 and the confidence interval
+
+The interval is the point. A win rate measured over a few hundred hours is
+mostly noise, and a bare "4.2 bb/100" invites you to believe a number the
+sample cannot support — so the app prints `+4.2 ± 6.0` and puts the full
+reading in the row's tooltip.
+
+Two properties worth knowing:
+
+- **No currency conversion happens.** Profit and the big blind are both in the
+  session's own currency, so the ratio is dimensionless — an HKD session pools
+  with an INR one directly, at no exchange rate.
+- **A session is only counted if it can be.** It must be a cash game, have
+  hours recorded, and have a stakes string with two numbers in it. Anything
+  else is dropped rather than guessed at, so the figure is based on fewer
+  sessions than the ledger holds — the tooltip says how many.
+
+Standard deviation typically lands near 80–100 bb/100 for live NLHE. A figure
+far outside that usually means a stakes string is being parsed wrong, not that
+your game is unusual.
+
+### Tags
+
+Free-form labels on a session — `tilted`, `short-handed`, `late`. Type them
+comma-separated, or tap the chips under the field for ones you've used before.
+They're lowercased and de-duplicated on save, so `Tilted` and `tilted ` don't
+become two chips for one idea. Each tag becomes a filter, which is the point:
+it's how you find out what your "tilted" sessions actually cost you.
 
 ---
 
@@ -116,6 +194,9 @@ cannot turn them red.
 | `schema.sql` | Run once on a new project — current table shape |
 | `migration_001_currency.sql` | Adds `currency`, drops `hours`. Existing projects only. |
 | `migration_002_index.sql` | Adds the `(user_id, date)` index. Existing projects only. |
+| `migration_003_hours.sql` | Re-adds `hours`, nullable. Existing projects only. |
+| `migration_004_tournaments.sql` | Adds `session_type` and the tournament columns. Existing projects only. |
+| `migration_005_tags.sql` | Adds `tags`. Existing projects only. |
 | `import_sessions.sql` | One-off backfill of historical sessions |
 
 `schema.sql` always describes the *current* shape of the table, so a fresh

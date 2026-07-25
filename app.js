@@ -11,6 +11,8 @@ let sessions = [];
 let activeFilter = 'all';       // stakes chip
 let activeLocation = 'all';     // venue chip
 let activeRange = 'all';        // 'all' | 'thisMonth' | '90d' | 'thisYear' | 'YYYY-MM'
+let activeType = 'all';         // 'all' | 'cash' | 'tournament'
+let activeTag = 'all';          // a tag string, or 'all'
 let editingId = null;           // non-null while the form is editing a session
 let profitChart, stakesChart, monthlyChart;
 
@@ -55,6 +57,8 @@ async function boot(){
       activeFilter = 'all';
       activeLocation = 'all';
       activeRange = 'all';
+      activeType = 'all';
+      activeTag = 'all';
       closeForm();
       appView.style.display = 'none';
       authView.style.display = 'flex';
@@ -177,9 +181,19 @@ async function loadSessions(){
         cashOut: Number(r.cash_out),
         currency: r.currency || baseCurrency(),
         // Null stays null — it means "not recorded", which is not the same as
-        // zero and must not become 0 here.
+        // zero and must not become 0 here. Same rule for every tournament
+        // field below: an unrecorded finish is not a finish of zero.
         hours: r.hours == null ? null : Number(r.hours),
-        notes: r.notes || ''
+        notes: r.notes || '',
+        // A project that has not run migration_004 yet returns undefined here,
+        // and 'cash' is the right reading of a row from before tournaments
+        // existed — which is also why the column defaults to it.
+        sessionType: r.session_type || 'cash',
+        fee: r.fee == null ? null : Number(r.fee),
+        entries: r.entries == null ? null : Number(r.entries),
+        place: r.place == null ? null : Number(r.place),
+        fieldSize: r.field_size == null ? null : Number(r.field_size),
+        tags: Array.isArray(r.tags) ? r.tags : []
       }));
     }
   } catch(e){
@@ -203,7 +217,16 @@ function toRow(s){
     cash_out: s.cashOut,
     currency: s.currency,
     hours: s.hours,          // null when left blank
-    notes: s.notes
+    notes: s.notes,
+    session_type: s.sessionType,
+    // Explicitly nulled on a cash row rather than left off the object: editing
+    // a tournament back into a cash game has to CLEAR these, and an omitted
+    // key in a Supabase update leaves the old value in place.
+    fee:        s.sessionType === 'tournament' ? s.fee : null,
+    entries:    s.sessionType === 'tournament' ? s.entries : null,
+    place:      s.sessionType === 'tournament' ? s.place : null,
+    field_size: s.sessionType === 'tournament' ? s.fieldSize : null,
+    tags: s.tags
   };
 }
 
@@ -317,12 +340,16 @@ function render(){
 // The strap under the masthead carries the period the ledger covers.
 function renderStrap(){
   const el = document.getElementById('strap');
-  if(!sessions.length){ el.textContent = 'cash game record'; return; }
+  // Names what the ledger actually holds. Calling it a cash game record once
+  // there are tournaments in it is a small lie that the figures then have to
+  // argue with.
+  const kind = sessions.some(isTournament) ? 'poker record' : 'cash game record';
+  if(!sessions.length){ el.textContent = kind; return; }
   const c = chronological(sessions);
   const month = d => new Date(d+'T00:00:00')
     .toLocaleDateString(undefined,{month:'short', year:'numeric'});
   const from = month(c[0].date), to = month(c[c.length-1].date);
-  el.textContent = 'cash game record · ' + (from === to ? from : `${from} – ${to}`);
+  el.textContent = kind + ' · ' + (from === to ? from : `${from} – ${to}`);
 }
 
 // Label on the left, figure on the right, dot leaders between — a printed
@@ -336,34 +363,106 @@ function summaryRow(label, value, cls, extra, title){
   </div>`;
 }
 
+// A ruled caption that separates the shared figures from the format-specific
+// ones. Only drawn when the section below it actually has rows.
+function sectionRow(label){
+  return `<div class="row section"><span class="label">${escapeHtml(label)}</span></div>`;
+}
+
 function renderStats(st){
   const any = st.count > 0;
   const dash = '—';
-  document.getElementById('statsRow').innerHTML = [
+  const bb = st.bb, t = st.tourney;
+
+  // Both formats share one bankroll, so everything above the first divider
+  // counts every session. Below it, the analysis splits: bb/100 and an hourly
+  // rate mean nothing for a tournament, ROI and ITM mean nothing for a cash
+  // game, and showing either against the wrong set is worse than not showing it.
+  const shared = [
     // The headline stays unsigned — its size and colour already say which way
     // it went, and a "+" on the hero figure reads as clutter.
     summaryRow('Net profit', any ? fmt(Math.round(st.totalProfit)) : dash,
-               resultClass(st.totalProfit), ' headline'),
-    summaryRow('Sessions', String(st.count)),
-    summaryRow('Win rate', any ? st.winRate.toFixed(0) + '%' : dash),
-    // Hours are optional, so these two rows only appear once you actually
-    // record some. Until then they would be permanent em-dashes.
-    st.timedCount ? summaryRow('Hourly rate', fmtSigned(Math.round(st.hourly)) + '/hr',
-                               resultClass(st.hourly), '',
-                               `Based on the ${st.timedCount} of ${st.count} sessions with hours recorded.`) : '',
-    st.timedCount ? summaryRow('Hours played', st.totalHours.toFixed(1)) : '',
+               resultClass(st.totalProfit), ' headline',
+               any && t.count ? `${st.cashCount} cash and ${t.count} tournament sessions, totalled together.` : ''),
+    summaryRow('Sessions', String(st.count), '', '',
+               t.count ? `${st.cashCount} cash, ${t.count} tournament.` : ''),
+    summaryRow('Win rate', any ? st.winRate.toFixed(0) + '%' : dash, '', '',
+               any ? 'Share of sessions that finished ahead.' : ''),
     summaryRow('Average / session', any ? fmtSigned(Math.round(st.avg)) : dash,
                resultClass(st.avg)),
     summaryRow('Best session', any ? fmtSigned(st.best) : dash, resultClass(st.best)),
     summaryRow('Worst session', any ? fmtSigned(st.worst) : dash, resultClass(st.worst)),
     summaryRow('Max drawdown', any ? fmt(Math.round(st.drawdown.max)) : dash,
                st.drawdown.max > 0 ? 'neg' : '', '',
-               any ? `Largest peak-to-trough fall. Currently ${fmt(Math.round(st.drawdown.current))} below the all-time peak.` : ''),
+               any ? 'Largest peak-to-trough fall the bankroll has taken.' : ''),
+    // The actionable one: max drawdown is history, this is where you are now.
+    // Zero means the last session left you at an all-time high, which is worth
+    // seeing as plainly as a loss is.
+    summaryRow('Current drawdown',
+               any ? (st.drawdown.current > 0 ? fmt(Math.round(st.drawdown.current)) : 'at peak') : dash,
+               st.drawdown.current > 0 ? 'neg' : 'pos', '',
+               any ? (st.drawdown.current > 0
+                 ? `How far the bankroll sits below its all-time high right now.`
+                 : 'The bankroll is at its all-time high.') : ''),
     summaryRow('Longest win streak', any ? String(st.streaks.longestWin) : dash, '', '',
                any ? `Current run: ${st.streaks.currentWin}.` : ''),
     summaryRow('Longest loss streak', any ? String(st.streaks.longestLoss) : dash, '', '',
                any ? `Current run: ${st.streaks.currentLoss}.` : '')
+  ];
+
+  // Hours are optional, so the cash rows only appear once some are recorded.
+  // Until then they would be permanent em-dashes.
+  const cash = [];
+  if(bb){
+    // ± is the 95% half-width, which is the honest headline: a win rate over a
+    // few hundred hours is mostly noise, and printing "4.2" alone invites you
+    // to believe a number the sample cannot support.
+    const margin = bb.se == null ? null : 1.96 * bb.se;
+    const value = fmtBB(bb.bbPer100) +
+      (margin == null ? '' : ` <span class="pm">± ${margin.toFixed(1)}</span>`);
+    const detail = [
+      `${bb.sessions} session${bb.sessions === 1 ? '' : 's'}, about ${Math.round(bb.hands).toLocaleString()} hands (${bb.hours.toFixed(1)}h × ${handsPerHour()}/hr).`,
+      margin == null ? 'A second session is needed before an interval means anything.'
+        : `95% confident the true rate is between ${fmtBB(bb.low)} and ${fmtBB(bb.high)}.`,
+      bb.sdPer100 == null ? '' : `Standard deviation ${bb.sdPer100.toFixed(0)} bb/100.`
+    ].filter(Boolean).join(' ');
+    cash.push(summaryRow('bb/100', value, resultClass(bb.bbPer100), '', detail));
+  }
+  if(st.timedCount){
+    cash.push(summaryRow('Hourly rate', fmtSigned(Math.round(st.hourly)) + '/hr',
+                         resultClass(st.hourly), '',
+                         `Based on the ${st.timedCount} of ${st.cashCount} cash sessions with hours recorded. Tournaments are excluded — their length is set by the structure, not by you.`));
+    cash.push(summaryRow('Hours played', st.totalHours.toFixed(1)));
+  }
+
+  const tourney = [];
+  if(t.count){
+    tourney.push(summaryRow('ROI', (t.roi >= 0 ? '+' : '−') + Math.abs(t.roi).toFixed(1) + '%',
+                            resultClass(t.roi), '',
+                            `${fmtSigned(Math.round(t.profit))} on ${fmt(Math.round(t.cost))} of buy-ins.`));
+    tourney.push(summaryRow('In the money', t.itmRate.toFixed(0) + '%', '', '',
+                            `Cashed ${t.itm} of ${t.count}.`));
+    tourney.push(summaryRow('Buy-ins', fmt(Math.round(t.cost)), '', '',
+                            t.entries === t.count ? '' : `${t.entries} entries across ${t.count} tournaments — you re-entered ${t.entries - t.count} time${t.entries - t.count === 1 ? '' : 's'}.`));
+    tourney.push(summaryRow('Winnings', fmt(Math.round(t.winnings))));
+    if(t.bestPlace !== null){
+      tourney.push(summaryRow('Best finish', ordinal(t.bestPlace), '', '',
+                              t.avgField ? `Average field ${Math.round(t.avgField)}.` : ''));
+    }
+  }
+
+  document.getElementById('statsRow').innerHTML = [
+    ...shared,
+    cash.length    ? sectionRow('Cash games') : '',    ...cash,
+    tourney.length ? sectionRow('Tournaments') : '',   ...tourney
   ].join('');
+}
+
+// 1st, 2nd, 3rd, 4th… 11th–13th are the exceptions that trip the naive rule.
+function ordinal(n){
+  const rem100 = n % 100;
+  if(rem100 >= 11 && rem100 <= 13) return n + 'th';
+  return n + (['th','st','nd','rd'][n % 10] || 'th');
 }
 
 // Suggestions for the location/stakes inputs, drawn from what's already in the
@@ -379,6 +478,34 @@ function fillDatalist(id, values){
   document.getElementById(id).innerHTML =
     values.map(v=>`<option value="${escapeHtml(v)}"></option>`).join('');
 }
+
+// Tags you have used before, as chips that toggle into the comma-separated
+// input. A datalist cannot do this job: it matches against the whole field,
+// and this field holds a list, so it would only ever suggest on the first tag.
+function renderTagSuggestions(){
+  const box = document.getElementById('tagSuggest');
+  const input = document.getElementById('f-tags');
+  const known = allTags(sessions);
+  if(!known.length){ box.innerHTML = ''; return; }
+
+  const chosen = new Set(parseTags(input.value));
+  box.innerHTML = known.slice(0, 12).map(t=>
+    `<button type="button" class="tag-chip ${chosen.has(t)?'on':''}" aria-pressed="${chosen.has(t)}" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</button>`
+  ).join('');
+
+  box.querySelectorAll('.tag-chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const tag = btn.dataset.tag;
+      const now = parseTags(input.value);
+      const next = now.includes(tag) ? now.filter(t=>t !== tag) : [...now, tag];
+      input.value = next.join(', ');
+      renderTagSuggestions();     // re-render so the pressed state follows
+    });
+  });
+}
+
+// Typing a tag by hand has to light its chip too, or the two disagree.
+document.getElementById('f-tags').addEventListener('input', renderTagSuggestions);
 
 // Clicking a bar filters to it, and clicking the active bar again clears —
 // otherwise the only way back is to hunt for the chip.
@@ -533,11 +660,18 @@ function renderChipRow(rowId, values, active, allLabel, onPick, label){
 function renderFilters(){
   const stakes = [...new Set(sessions.map(stakesLabel))];
   const locations = [...new Set(sessions.map(s=>s.location))];
+  const tags = allTags(sessions);
+  // Fixed order rather than order-of-appearance, so the chips don't reshuffle
+  // when you add a session. renderChipRow hides the row entirely when there is
+  // only one value, so an all-cash ledger never sees this filter at all.
+  const types = ['cash','tournament'].filter(t => sessions.some(s => (s.sessionType || 'cash') === t));
 
   // A filtered-away value may have just been deleted; without this the list
   // filters down to nothing and the chip to clear it no longer exists.
   if(activeFilter !== 'all' && !stakes.includes(activeFilter)) activeFilter = 'all';
   if(activeLocation !== 'all' && !locations.includes(activeLocation)) activeLocation = 'all';
+  if(activeTag !== 'all' && !tags.includes(activeTag)) activeTag = 'all';
+  if(activeType !== 'all' && !types.includes(activeType)) activeType = 'all';
 
   // A month picked by clicking the by-month chart appears as an extra chip so
   // there is always a visible way to see it and clear it.
@@ -546,14 +680,19 @@ function renderFilters(){
 
   renderChipRow('rangeRow', ranges, activeRange, 'All time',
     v=>{ activeRange = v; render(); }, rangeLabel);
+  renderChipRow('typeRow', types, activeType, 'Both formats',
+    v=>{ activeType = v; render(); }, v => v === 'cash' ? 'Cash' : 'Tournaments');
   renderChipRow('filterRow', stakes, activeFilter, 'All stakes',
     v=>{ activeFilter = v; render(); });
   renderChipRow('locationFilterRow', locations, activeLocation, 'All venues',
     v=>{ activeLocation = v; render(); });
+  renderChipRow('tagRow', tags, activeTag, 'All tags',
+    v=>{ activeTag = v; render(); }, v => '#' + v);
 
   const filtered = visibleSessions().length;
   const note = document.getElementById('filterNote');
-  const on = activeFilter !== 'all' || activeLocation !== 'all' || activeRange !== 'all';
+  const on = activeFilter !== 'all' || activeLocation !== 'all' || activeRange !== 'all'
+          || activeType !== 'all' || activeTag !== 'all';
   note.textContent = on
     ? `Showing ${filtered} of ${sessions.length} sessions — every figure and chart below reflects this.`
     : '';
@@ -562,8 +701,10 @@ function renderFilters(){
 
 function visibleSessions(){
   return sessions
+    .filter(s=> activeType === 'all' || (s.sessionType || 'cash') === activeType)
     .filter(s=> activeFilter === 'all' || stakesLabel(s) === activeFilter)
     .filter(s=> activeLocation === 'all' || s.location === activeLocation)
+    .filter(s=> activeTag === 'all' || hasTag(s, activeTag))
     .filter(s=> matchesRange(s.date, activeRange))
     .sort((a,b)=> a.date < b.date ? 1 : a.date > b.date ? -1 : 0);   // newest first
 }
@@ -607,10 +748,21 @@ function renderList(){
     const dim = t => `<span class="dim"> · ${t}</span>`;
     // Foreign sessions show the amount actually won alongside what it counts
     // for in the totals, so the arithmetic on this page is never a mystery.
+    // A tournament additionally shows its cost, because its profit is
+    // cash-out minus (buy-in + fee) × entries — arithmetic you cannot do in
+    // your head from the row unless the row says what it cost.
+    const tourneyDetail = !isTournament(s) ? '' :
+      dim('MTT')
+      + ((s.entries || 1) > 1 ? dim(s.entries + ' entries') : '')
+      + dim('cost ' + fmt(totalCost(s), s.currency))
+      + (s.place ? dim(ordinal(s.place) + (s.fieldSize ? ' of ' + s.fieldSize : '')) : '');
+
     const detail = escapeHtml(stakesLabel(s))
+      + tourneyDetail
       + (typeof s.hours === 'number' ? dim(s.hours + 'h') : '')
       + (multiVenue ? dim(escapeHtml(s.location)) : '')
       + (s.currency === baseCurrency() ? '' : dim('≈ ' + fmt(Math.round(profitBase(s)))))
+      + sessionTags(s).map(t=>` <span class="tag">#${escapeHtml(t)}</span>`).join('')
       + (s.notes ? dim(escapeHtml(s.notes)) : '');
 
     const what = `${s.location} on ${fullDate}`;
@@ -672,13 +824,30 @@ currencySelect.innerHTML = Object.keys(FX_RATES)
   .join('');
 currencySelect.value = baseCurrency();
 
-// Buy-in/cash-out are entered in the selected currency, so say which.
+const typeSelect = document.getElementById('f-type');
+
+function formIsTournament(){ return typeSelect.value === 'tournament'; }
+
+// Buy-in/cash-out are entered in the selected currency, so say which. The
+// wording changes with the format too: a tournament's buy-in is per entry and
+// its "cash-out" is winnings, and calling both by the cash-game name is how
+// you end up recording the total spend in a field the app reads as one entry.
 function updateAmountLabels(){
   const sym = symbolFor(currencySelect.value).trim();
-  document.getElementById('lbl-buyin').textContent = `Buy-in (${sym})`;
-  document.getElementById('lbl-cashout').textContent = `Cash-out (${sym})`;
+  const mtt = formIsTournament();
+  document.getElementById('lbl-buyin').textContent =
+    mtt ? `Buy-in (${sym}) per entry` : `Buy-in (${sym})`;
+  document.getElementById('lbl-cashout').textContent =
+    mtt ? `Winnings (${sym})` : `Cash-out (${sym})`;
+  document.getElementById('lbl-fee').innerHTML =
+    `Fee (${escapeHtml(sym)}) <span class="opt">per entry</span>`;
+  document.getElementById('lbl-stakes').textContent = mtt ? 'Event' : 'Stakes';
+  document.getElementById('f-stakes').placeholder = mtt ? 'Sunday Main' : '1/2';
+  // CSS hides .tourney-only unless the form carries this class.
+  form.classList.toggle('tournament', mtt);
 }
 currencySelect.addEventListener('change', updateAmountLabels);
+typeSelect.addEventListener('change', updateAmountLabels);
 updateAmountLabels();
 
 function todayLocal(){
@@ -688,10 +857,12 @@ function todayLocal(){
 }
 
 function clearFormFields(){
-  ['f-location','f-stakes','f-buyin','f-cashout','f-hours','f-notes'].forEach(id=>{
+  ['f-location','f-stakes','f-buyin','f-cashout','f-hours','f-notes',
+   'f-fee','f-entries','f-place','f-field','f-tags'].forEach(id=>{
     document.getElementById(id).value = '';
   });
   currencySelect.value = baseCurrency();
+  typeSelect.value = 'cash';
   updateAmountLabels();   // setting .value in code fires no 'change' event
 }
 
@@ -708,7 +879,13 @@ function openForm(session){
     document.getElementById('f-buyin').value = session.buyIn;
     document.getElementById('f-cashout').value = session.cashOut;
     currencySelect.value = session.currency;
+    typeSelect.value = session.sessionType || 'cash';
     document.getElementById('f-hours').value = session.hours ?? '';
+    document.getElementById('f-fee').value = session.fee ?? '';
+    document.getElementById('f-entries').value = session.entries ?? '';
+    document.getElementById('f-place').value = session.place ?? '';
+    document.getElementById('f-field').value = session.fieldSize ?? '';
+    document.getElementById('f-tags').value = sessionTags(session).join(', ');
     document.getElementById('f-notes').value = session.notes;
     updateAmountLabels();
   } else {
@@ -716,6 +893,7 @@ function openForm(session){
     document.getElementById('f-date').value = todayLocal();
   }
 
+  renderTagSuggestions();
   showFormError('');
   form.classList.add('open');
   toggleBtn.style.display = 'none';
@@ -752,13 +930,29 @@ form.addEventListener('submit', async (e)=>{
   const buyIn = parseFloat(document.getElementById('f-buyin').value);
   const cashOut = parseFloat(document.getElementById('f-cashout').value);
   const currency = currencySelect.value;
+  const sessionType = typeSelect.value;
+  const mtt = sessionType === 'tournament';
   // Blank stays null: "not recorded" is not the same as zero hours.
   const rawHours = document.getElementById('f-hours').value.trim();
   const hours = rawHours === '' ? null : parseFloat(rawHours);
   const notes = document.getElementById('f-notes').value.trim();
+  const tags = parseTags(document.getElementById('f-tags').value);
+
+  // Same rule for all four: blank means not recorded, and only a tournament
+  // records them at all.
+  const optNum = id => {
+    const raw = document.getElementById(id).value.trim();
+    return raw === '' ? null : parseFloat(raw);
+  };
+  const fee       = mtt ? optNum('f-fee') : null;
+  const entries   = mtt ? optNum('f-entries') : null;
+  const place     = mtt ? optNum('f-place') : null;
+  const fieldSize = mtt ? optNum('f-field') : null;
 
   if(!date || !location || !stakes || isNaN(buyIn) || isNaN(cashOut)){
-    showFormError('Fill in date, location, stakes, buy-in, and cash-out.');
+    showFormError(mtt
+      ? 'Fill in date, location, event, buy-in, and winnings (0 if you busted).'
+      : 'Fill in date, location, stakes, buy-in, and cash-out.');
     return;
   }
   if(hours !== null && (isNaN(hours) || hours <= 0)){
@@ -769,11 +963,34 @@ form.addEventListener('submit', async (e)=>{
     showFormError('Buy-in and cash-out are amounts, not results — neither can be negative. A losing session is a cash-out lower than the buy-in.');
     return;
   }
+  if(mtt){
+    if(fee !== null && (isNaN(fee) || fee < 0)){
+      showFormError('The fee is an amount, not a result — it cannot be negative. Leave it blank if the buy-in had no fee on top.');
+      return;
+    }
+    // Entries is the one field that must not be left to interpretation: it
+    // multiplies the cost, so a stray 0 would report the tournament as free.
+    if(entries !== null && (isNaN(entries) || entries < 1 || entries % 1 !== 0)){
+      showFormError('Entries must be a whole number of at least 1 — one for a freezeout, more if you re-entered. Leave it blank for one.');
+      return;
+    }
+    for(const [v, name] of [[place,'Finish'], [fieldSize,'Field size']]){
+      if(v !== null && (isNaN(v) || v < 1 || v % 1 !== 0)){
+        showFormError(`${name} must be a whole number of at least 1, or left blank.`);
+        return;
+      }
+    }
+    if(place !== null && fieldSize !== null && place > fieldSize){
+      showFormError('You cannot finish lower than the size of the field.');
+      return;
+    }
+  }
 
   const saveBtn = document.getElementById('saveSessionBtn');
   saveBtn.disabled = true;
   try {
-    const payload = {date, location, stakes, buyIn, cashOut, currency, hours, notes};
+    const payload = {date, location, stakes, buyIn, cashOut, currency, hours, notes,
+                     sessionType, fee, entries, place, fieldSize, tags};
     const ok = editingId
       ? await updateSession(editingId, payload)
       : await addSession(payload);

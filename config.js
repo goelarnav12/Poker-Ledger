@@ -27,3 +27,18 @@ const FX_RATES = {
   INR: 1,
   HKD: 11.15,
 };
+
+// -----------------------------------------------------------------
+// Hands per hour
+//
+// bb/100 is a rate per hundred hands, but a live ledger records hours — no
+// one counts hands at the table. Hands are therefore estimated as
+// hours × this number, so the bb/100 figure and its confidence interval are
+// only ever as good as this estimate.
+//
+// 30 is the usual live full-ring rate. A 6-max game, a fast dealer or a
+// shot-clock room runs closer to 35-40; online is several times higher.
+// Changing it rescales bb/100 for every past session — it does not change
+// any money figure, which is measured, not estimated.
+// -----------------------------------------------------------------
+const HANDS_PER_HOUR = 30;

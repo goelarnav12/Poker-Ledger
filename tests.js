@@ -24,9 +24,17 @@ function near(actual, expected, what, tol=0.001){
 
 // Pin the rates so these tests don't break when config.js is retuned.
 setCurrencyConfig({INR:1, HKD:11.15}, 'INR');
+// Same reason: bb/100 is derived from hands, and hands from this.
+setHandsPerHour(30);
 
 const S = (date, stakes, pnl, currency='INR', location="Pranshu's Game") =>
   ({id:date, date, stakes, location, buyIn:0, cashOut:pnl, currency, notes:''});
+
+// A tournament row. `stakes` carries the event name, and cost is
+// (buyIn + fee) × entries rather than just the buy-in.
+const T = (date, event, buyIn, fee, entries, cashOut, extra={}) =>
+  ({id:date, date, stakes:event, location:'Casino', sessionType:'tournament',
+    buyIn, fee, entries, cashOut, currency:'INR', notes:'', ...extra});
 
 // The real ledger: 35 INR sessions plus one HKD session at Venetian Macau.
 const LEDGER = [
@@ -233,6 +241,201 @@ check('rangeLabel names each range', ()=>{
   return rangeLabel('2026-02');
 });
 
+// ---------- tournaments ----------
+check('a row with no session_type is a cash game', ()=>{
+  const s = S('2026-01-01','1/2',500);
+  eq(isTournament(s), false);
+  eq(totalCost({...s, buyIn:300}), 300, 'cost is just the buy-in');
+});
+check('tournament cost includes the fee and every entry', ()=>{
+  eq(totalCost(T('2026-01-01','Main',1000,100,1,0)), 1100, 'freezeout');
+  eq(totalCost(T('2026-01-01','Main',1000,100,3,0)), 3300, 'two re-entries');
+  eq(totalCost(T('2026-01-01','Main',1000,0,1,0)), 1000, 'no fee');
+});
+check('a missing entries or fee is treated as one entry and no fee', ()=>{
+  eq(totalCost({...T('2026-01-01','Main',1000,null,null,0)}), 1000);
+});
+check('tournament profit subtracts the whole cost, not the buy-in', ()=>{
+  // Busting a 1000+100 you re-entered twice loses 3300, not 1000.
+  eq(profitOf(T('2026-01-01','Main',1000,100,3,0)), -3300);
+  eq(profitOf(T('2026-01-01','Main',1000,100,3,5000)), 1700);
+});
+check('in the money is decided by the payout, not the recorded place', ()=>{
+  eq(inTheMoney(T('2026-01-01','Main',1000,100,1,5000)), true);
+  eq(inTheMoney(T('2026-01-01','Main',1000,100,1,0)), false);
+  // place unrecorded but paid: still a cash
+  eq(inTheMoney(T('2026-01-01','Main',1000,100,1,5000,{place:null})), true);
+  eq(inTheMoney(S('2026-01-01','1/2',5000)), false, 'a cash game is never ITM');
+});
+check('tournamentStats reports ROI over what was actually spent', ()=>{
+  const st = tournamentStats([
+    T('2026-01-01','Main',1000,100,1,0),        // cost 1100, bust
+    T('2026-01-08','Main',1000,100,2,5000)      // cost 2200, cashed
+  ]);
+  eq(st.count, 2);
+  eq(st.entries, 3, 'entries counts re-entries');
+  near(st.cost, 3300, 'cost');
+  near(st.winnings, 5000, 'winnings');
+  near(st.profit, 1700, 'profit');
+  near(st.roi, 1700/3300*100, 'roi');
+  eq(st.itm, 1);
+  near(st.itmRate, 50, 'itm rate');
+});
+check('tournamentStats records the best finish and average field', ()=>{
+  const st = tournamentStats([
+    T('2026-01-01','Main',1000,0,1,5000,{place:12, fieldSize:200}),
+    T('2026-01-08','Main',1000,0,1,0,     {place:80, fieldSize:100}),
+    T('2026-01-15','Main',1000,0,1,0)     // no place recorded at all
+  ]);
+  eq(st.bestPlace, 12, 'best finish');
+  near(st.avgField, 150, 'average field over the two that recorded one');
+});
+check('tournamentStats on no tournaments is zeroed, never NaN', ()=>{
+  const st = tournamentStats(LEDGER);
+  eq(st.count, 0); eq(st.roi, 0); eq(st.itmRate, 0); eq(st.bestPlace, null);
+  eq(Number.isFinite(st.profit), true);
+});
+check('a freeroll cannot divide by zero', ()=>{
+  const st = tournamentStats([T('2026-01-01','Freeroll',0,0,1,500)]);
+  eq(st.roi, 0, 'no cost means no return on it');
+  near(st.profit, 500);
+});
+check('tournaments convert to the base currency before pooling', ()=>{
+  const st = tournamentStats([
+    {...T('2026-01-01','Macau Main',100,0,1,300), currency:'HKD'}
+  ]);
+  near(st.cost, 1115, 'cost');        // 100 * 11.15
+  near(st.winnings, 3345, 'winnings');
+  near(st.profit, 2230);
+});
+
+// ---------- bb/100 ----------
+check('parseBigBlind takes the second number in the stakes', ()=>{
+  eq(parseBigBlind('1/2'), 2);
+  eq(parseBigBlind('50/100'), 100);
+  eq(parseBigBlind('2/5/10'), 5, 'a straddled game still has a bb of 5');
+  eq(parseBigBlind('5/10 (HKD)'), 10);
+  eq(parseBigBlind('0.5/1'), 1);
+});
+check('parseBigBlind returns null rather than guessing', ()=>{
+  eq(parseBigBlind('Sunday Million'), null, 'an event name has no big blind');
+  eq(parseBigBlind('100'), null, 'one number is not a blind level');
+  eq(parseBigBlind(''), null);
+  eq(parseBigBlind(null), null);
+  eq(parseBigBlind('0/0'), null, 'a zero big blind would divide by zero');
+});
+check('fmtBB signs to one decimal and never prints a negative zero', ()=>{
+  eq(fmtBB(4.25), '+4.3');
+  eq(fmtBB(-1.84), '−1.8');      // true minus, matching fmtSigned
+  eq(fmtBB(0), '0.0');
+  eq(fmtBB(-0.04), '0.0', 'rounds to zero, so carries no sign');
+  eq(fmtBB(Infinity), '—');
+});
+check('winRateCI needs hours, so a ledger without them yields null', ()=>{
+  eq(winRateCI(LEDGER), null);
+});
+check('bb/100 is profit in big blinds over hands, hands being hours x 30', ()=>{
+  // 1/2 game: +200 is 100bb. 10 hours is 300 hands. 100/300 * 100 = 33.33
+  const r = winRateCI([{...S('2026-01-01','1/2',200), hours:10}]);
+  near(r.bbPer100, 100/3, 'bb/100');
+  eq(r.hands, 300, 'hands');
+  eq(r.sessions, 1);
+  eq(r.low, null, 'one session gives no interval');
+});
+check('the confidence interval widens with the spread of results', ()=>{
+  const r = winRateCI([
+    {...S('2026-01-01','1/2', 200), hours:10},   // +100bb over 300 hands
+    {...S('2026-01-02','1/2',-100), hours:10}    //  -50bb over 300 hands
+  ]);
+  near(r.bbPer100, 50/600*100, 'bb/100');        // 8.333
+  near(r.sdPer100, Math.sqrt(3750), 'sd per 100');
+  near(r.se, 25, 'standard error');
+  near(r.low, 50/600*100 - 1.96*25, 'lower bound');
+  near(r.high, 50/600*100 + 1.96*25, 'upper bound');
+});
+check('bb/100 needs no currency conversion', ()=>{
+  // A 5/10 HKD session won 100 HKD = 10bb. A 50/100 INR session won 1000 = 10bb.
+  // Pooled they are 20bb over 600 hands regardless of the exchange rate.
+  const r = winRateCI([
+    {...S('2026-01-01','5/10',100,'HKD'), hours:10},
+    {...S('2026-01-02','50/100',1000),    hours:10}
+  ]);
+  near(r.bb, 20, 'big blinds won');
+  near(r.bbPer100, 20/600*100, 'bb/100');
+});
+check('bb/100 excludes tournaments and unparseable stakes', ()=>{
+  const r = winRateCI([
+    {...S('2026-01-01','1/2',200), hours:10},
+    {...T('2026-01-02','Sunday Million',1000,100,1,9999), hours:10},
+    {...S('2026-01-03','Home game',5000), hours:10}   // no blind level to read
+  ]);
+  eq(r.sessions, 1, 'only the cash game with a readable big blind counts');
+  near(r.bbPer100, 100/3);
+});
+check('changing hands per hour rescales bb/100 but not the money', ()=>{
+  const list = [{...S('2026-01-01','1/2',200), hours:10}];
+  const at30 = winRateCI(list).bbPer100;
+  setHandsPerHour(60);
+  const at60 = winRateCI(list).bbPer100;
+  setHandsPerHour(30);                       // restore for everything after
+  near(at60, at30/2, 'twice the hands, half the rate per hundred');
+  near(computeStats(list).totalProfit, 200, 'money is measured, not estimated');
+});
+
+// ---------- one bankroll, separate analysis ----------
+check('computeStats totals cash and tournaments into one net profit', ()=>{
+  const st = computeStats([
+    S('2026-01-01','1/2',500),
+    T('2026-01-08','Main',1000,100,1,3000)     // profit 1900
+  ]);
+  eq(st.count, 2, 'both formats are sessions');
+  near(st.totalProfit, 2400, 'one bankroll');
+  eq(st.cashCount, 1);
+  eq(st.tourney.count, 1);
+});
+check('the hourly rate ignores tournament hours', ()=>{
+  const st = computeStats([
+    {...S('2026-01-01','1/2',1000), hours:5},
+    {...T('2026-01-08','Main',1000,0,1,9000), hours:10}   // +8000 over 10h
+  ]);
+  eq(st.timedCount, 1, 'only the cash session');
+  near(st.totalHours, 5, 'hours');
+  near(st.hourly, 200, 'the tournament must not drag the cash rate up');
+});
+check('an all-cash ledger is unchanged by the tournament code', ()=>{
+  const st = computeStats(LEDGER);
+  eq(st.count, 36);
+  near(st.totalProfit, 163350, 'total');   // same figure as before migration_004
+  eq(st.tourney.count, 0);
+});
+
+// ---------- tags ----------
+check('parseTags lowercases, trims, dedupes and drops blanks', ()=>{
+  eq(parseTags('Tilted, tilted , SHORT-HANDED,,  ').join('|'), 'tilted|short-handed');
+  eq(parseTags('').length, 0);
+  eq(parseTags(null).length, 0);
+  eq(parseTags('one').join('|'), 'one');
+});
+check('sessionTags is empty rather than undefined for an untagged session', ()=>{
+  eq(sessionTags(S('2026-01-01','1/2',100)).length, 0);
+  eq(hasTag(S('2026-01-01','1/2',100), 'tilted'), false);
+});
+check('hasTag matches an exact tag', ()=>{
+  const s = {...S('2026-01-01','1/2',100), tags:['tilted','late']};
+  eq(hasTag(s,'tilted'), true);
+  eq(hasTag(s,'late'), true);
+  eq(hasTag(s,'til'), false, 'not a substring match');
+});
+check('allTags lists every tag once, most used first', ()=>{
+  const list = [
+    {...S('2026-01-01','1/2',1), tags:['late','tilted']},
+    {...S('2026-01-02','1/2',1), tags:['late']},
+    {...S('2026-01-03','1/2',1), tags:['late','drunk']},
+    {...S('2026-01-04','1/2',1)}
+  ];
+  eq(allTags(list).join('|'), 'late|drunk|tilted');   // 3, then 1s alphabetically
+});
+
 // ---------- CSV ----------
 check('csvCell quotes only when it must', ()=>{
   eq(csvCell('plain'), 'plain');
@@ -245,7 +448,7 @@ check('toCSV emits a header and one row per session', ()=>{
   const csv = toCSV([S('2026-01-09','50/100',14150), S('2026-01-16','50/100',-30000)]);
   const lines = csv.split('\r\n');
   eq(lines.length, 3, 'line count');
-  eq(lines[0].startsWith('date,location,stakes'), true, 'header');
+  eq(lines[0].startsWith('date,type,location,stakes'), true, 'header');
   eq(lines[1].includes('2026-01-09'), true, 'first row is oldest');
   eq(lines[1].endsWith('14150,14150'), true, 'profit and base profit');
 });
@@ -253,7 +456,31 @@ check('toCSV escapes a venue containing a comma or apostrophe', ()=>{
   const s = S('2026-01-01','1/2',100,'INR',"Pranshu's Game, Delhi");
   const line = toCSV([s]).split('\r\n')[1];
   eq(line.includes('"Pranshu\'s Game, Delhi"'), true, 'quoted venue');
-  eq(line.split(',').length, 11, 'comma inside quotes must not add a column');
+  // 17 columns, and the naive split finds 18 because it does not respect the
+  // quotes — which is the point: the comma survived instead of being stripped,
+  // so a real CSV parser will put it back together as one field.
+  eq(line.split(',').length, 18, 'the embedded comma is still there, quoted');
+});
+check('toCSV carries the tournament fields and the derived cost', ()=>{
+  const t = T('2026-01-01','Sunday Main',1000,100,3,5000,{place:7, fieldSize:400});
+  const line = toCSV([{...t, tags:['deep','tired']}]).split('\r\n')[1];
+  const cells = line.split(',');
+  eq(cells[1], 'tournament', 'type');
+  eq(cells[3], 'Sunday Main', 'event name sits in the stakes column');
+  eq(cells[5], '100', 'fee');
+  eq(cells[6], '3', 'entries');
+  eq(cells[10], '7', 'place');
+  eq(cells[11], '400', 'field size');
+  eq(cells[12], 'deep tired', 'tags are space separated so they need no quoting');
+  eq(line.endsWith('3300,1700,1700'), true, 'total cost, profit, base profit');
+});
+check('toCSV leaves the tournament columns blank on a cash row', ()=>{
+  const cells = toCSV([S('2026-01-01','1/2',100)]).split('\r\n')[1].split(',');
+  eq(cells[1], 'cash', 'type');
+  eq(cells[5], '', 'fee');
+  eq(cells[6], '', 'entries');
+  eq(cells[10], '', 'place');
+  eq(cells[12], '', 'tags');
 });
 check('toCSV converts foreign currency in the base column', ()=>{
   const line = toCSV([S('2026-03-28','5/10',7000,'HKD','Venetian Macau')]).split('\r\n')[1];

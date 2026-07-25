@@ -8,7 +8,10 @@ create table if not exists sessions (
   user_id uuid not null references auth.users(id) default auth.uid(),
   date date not null,
   location text not null,
+  -- A blind level ("50/100") for a cash game, the event name for a tournament.
   stakes text not null,
+  -- Cash: what you sat down with. Tournament: the prize-pool portion of ONE
+  -- entry — see `fee` and `entries` below, and `totalCost()` in stats.js.
   buy_in numeric not null,
   cash_out numeric not null,
   -- Amounts above are denominated in this currency. The app converts to
@@ -18,11 +21,33 @@ create table if not exists sessions (
   -- than counted as zero, so leaving this null is a legitimate choice.
   hours numeric check (hours is null or hours > 0),
   notes text,
+
+  -- Both formats share this table so there is one bankroll. Only the analysis
+  -- differs: bb/100 is cash-only, ROI and ITM are tournament-only.
+  session_type text not null default 'cash'
+    check (session_type in ('cash', 'tournament')),
+  -- The four below are null for a cash session. Null means "not recorded",
+  -- never zero — the same rule `hours` follows.
+  fee numeric check (fee is null or fee >= 0),
+  entries integer check (entries is null or entries >= 1),
+  place integer check (place is null or place >= 1),
+  field_size integer check (field_size is null or field_size >= 1),
+  constraint sessions_place_within_field
+    check (place is null or field_size is null or place <= field_size),
+
+  -- Free-form labels ("tilted", "short-handed"). NOT NULL with a '{}' default
+  -- so nothing has to branch on null to iterate them.
+  tags text[] not null default '{}',
+
   created_at timestamptz not null default now()
 );
 
 -- Every query the app makes is "my sessions, by date", so index exactly that.
 create index if not exists sessions_user_date_idx on sessions (user_id, date);
+
+-- Only useful for querying tags from the SQL editor; the app filters in
+-- memory, having already loaded every row.
+create index if not exists sessions_tags_idx on sessions using gin (tags);
 
 alter table sessions enable row level security;
 

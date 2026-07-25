@@ -140,6 +140,28 @@ h1{
 .summary .row.headline .label{ font-size:13px; color:var(--text-soft); }
 .summary .row.headline .value{ font-size:38px; font-weight:600; letter-spacing:-0.015em; }
 
+/* Caption dividing the shared figures from the cash-only and tournament-only
+   ones. No leader and no value — it is a heading, not a row of the table. */
+.summary .row.section{
+  padding:22px 0 5px;
+  border-bottom:1px solid var(--rule);
+}
+.summary .row.section .label{
+  color:var(--text-soft);
+  text-transform:uppercase;
+  font-size:10.5px;
+  letter-spacing:0.14em;
+}
+
+/* The ± half-width beside bb/100. Deliberately quieter than the figure it
+   qualifies, but never hidden: the interval is the honest part. */
+.summary .value .pm{
+  font-family:var(--mono);
+  font-size:12px;
+  color:var(--muted);
+  margin-left:2px;
+}
+
 .pos{ color:var(--win); }
 .neg{ color:var(--loss); }
 .zero{ color:var(--muted); }
@@ -283,6 +305,33 @@ h1{
 .field label .opt{
   letter-spacing:0.04em; text-transform:none;
   color:#5C574B; font-size:10px;
+}
+
+/* Tournament-only fields. app.js toggles .tournament on the form when the type
+   picker changes; the grid reflows around whatever is left visible. */
+.session-form:not(.tournament) .tourney-only{ display:none; }
+
+/* ---------- Tags ---------- */
+/* Previously-used tags, under the tag input. Toggling one edits the
+   comma-separated field rather than replacing it. */
+.tag-suggest{ display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
+.tag-suggest:empty{ margin-top:0; }
+.tag-chip{
+  font-family:var(--mono); font-size:11px;
+  padding:3px 8px; cursor:pointer;
+  background:none; border:1px solid var(--rule-soft); border-radius:3px;
+  color:var(--muted);
+}
+.tag-chip:hover{ color:var(--text); border-color:var(--rule); }
+.tag-chip.on{ color:var(--text); border-color:var(--rule); background:var(--ground-up); }
+
+/* A tag as it appears inline on a session row. Same weight as the other
+   dimmed detail, but boxed so a run of them reads as labels rather than prose. */
+.session .tag{
+  font-family:var(--mono); font-size:10.5px;
+  padding:1px 5px; margin-left:5px; border-radius:3px;
+  background:var(--ground-up); color:var(--muted);
+  white-space:nowrap;
 }
 
 /* ---------- Narrow ---------- */

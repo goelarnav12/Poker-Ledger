@@ -79,6 +79,61 @@ attributes.
 - Tabs live in the URL hash and follow the ARIA pattern (arrows, Home/End,
   roving tabindex). Shortcuts `n` / `1` / `2` are suppressed while typing.
 
+## Formats
+
+One table, two formats, **one bankroll**. `session_type` is `'cash'` or
+`'tournament'`; a row with neither (anything predating migration_004) is cash,
+which is why `isTournament()` tests for the tournament value rather than
+against the cash one.
+
+**`totalCost()` is the single place cost is computed.** Cash is the buy-in;
+a tournament is `(buy_in + fee) × entries`. `profitOf()` reads it, so every
+chart, total, streak and drawdown downstream inherited tournaments for free —
+that was the whole point of routing it through one function. Don't reintroduce
+`cashOut - buyIn` anywhere.
+
+A tournament reuses `stakes` for its event name, which is deliberate: it means
+`stakesLabel()`, the chip filters and the by-stakes chart all work unchanged,
+and it means `parseBigBlind()` returns null for tournaments without anything
+having to test the type. `stakesLabel()` does skip the currency suffix for
+tournaments — "Sunday Main (HKD)" reads as a different event, not a different
+denomination.
+
+**The analysis splits, the bankroll doesn't.** `computeStats` returns shared
+figures over everything, plus `bb` (cash only, may be null) and `tourney`. The
+hourly rate is CASH ONLY — a tournament's length is set by its structure, so
+including it measures the blind levels rather than the player. `renderStats`
+draws a `sectionRow` divider before each group and omits the group entirely
+when it is empty.
+
+## bb/100
+
+`winRateCI()` returns null rather than zero when nothing qualifies — a zero
+would look like a measurement. A session counts only if it is cash, has hours,
+and has a stakes string with two numbers.
+
+- **No FX conversion, and that is not an oversight.** Profit and the big blind
+  are both native, so the ratio is dimensionless and sessions in different
+  currencies pool directly. Adding `toBase()` here would be a bug.
+- **Hands are estimated**, `hours × HANDS_PER_HOUR` from config.js. That's the
+  one soft number in the file; the money figures are all measured.
+- **The interval is the feature.** SD per 100 is `sqrt(100 × varPerHand)`, not
+  100 × the per-hand SD — variance scales with hands, not linearly. The
+  per-session residual is divided by that session's hands before pooling,
+  which is what makes a 10-hour session comparable with a 2-hour one. Expect
+  SD near 80–100 bb/100 for live NLHE; far outside that means a stakes string
+  is parsing wrong.
+
+## Tags
+
+`text[]`, NOT NULL defaulting to `{}`, so nothing branches on null.
+`parseTags()` lowercases, trims, dedupes and drops blanks on the way in —
+normalise there, never at the display end. Tag options come from ALL sessions
+(same rule as the other chips), and `renderTagSuggestions()` re-renders on
+every input event so the chips and the comma-separated field can't disagree.
+A datalist can't do that job: it matches the whole field, and the field is a
+list.
+
 ## Currency
 
 Sessions are stored in the currency they were played in (`sessions.currency`,
@@ -107,9 +162,9 @@ hours.
 
 ## Filters
 
-`activeFilter` (stakes), `activeLocation` (venue) and `activeRange` (date) all
-feed `visibleSessions()`, which drives **the figures and the charts as well as
-the list**. Filtering to 100/200 and still seeing all-time stats was the single
+`activeFilter` (stakes), `activeLocation` (venue), `activeRange` (date),
+`activeType` (cash/tournament) and `activeTag` all feed `visibleSessions()`,
+which drives **the figures and the charts as well as the list**. Filtering to 100/200 and still seeing all-time stats was the single
 most confusing thing about an earlier layout — don't reintroduce it.
 
 Two rules that look redundant but aren't:
@@ -138,6 +193,8 @@ numbered `migration_NNN_*.sql`, run by hand in the same place:
 | `migration_001_currency.sql` | added `currency`, dropped the old NOT NULL `hours` |
 | `migration_002_index.sql` | index on `(user_id, date)` |
 | `migration_003_hours.sql` | re-added `hours`, nullable, `check (hours > 0)` |
+| `migration_004_tournaments.sql` | `session_type`, plus `fee`/`entries`/`place`/`field_size` |
+| `migration_005_tags.sql` | `tags text[] not null default '{}'`, GIN index |
 
 `import_sessions.sql` is a one-off backfill and is safe to re-run — it
 anti-joins on `(user_id, date, stakes)`. Its email is a placeholder set once via
