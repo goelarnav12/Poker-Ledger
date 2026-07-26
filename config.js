@@ -22,10 +22,20 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // numbers move when you update it. The dropdown in the add-session form is
 // built from these keys, so adding a currency here is all it takes.
 // -----------------------------------------------------------------
+// Rates are "1 unit of this currency = N units of BASE_CURRENCY".
+// Adding a key here is the WHOLE change: the form's dropdown is built from
+// Object.keys(FX_RATES), and stats.js already knows the symbols for USD, EUR,
+// GBP, SGD, AUD, CAD and JPY. Uncomment or add whatever you actually play in —
+// an unused currency is just a longer dropdown.
 const BASE_CURRENCY = "INR";
 const FX_RATES = {
   INR: 1,
-  HKD: 11.15,
+  HKD: 11.15,   // stale: ~12.30 as of Jul 2026 — see the note in README
+  USD: 96.5,    // Jul 2026
+  // EUR: 112.0,
+  // GBP: 129.0,
+  // SGD: 75.0,
+  // AUD: 63.0,
 };
 
 // -----------------------------------------------------------------
@@ -36,9 +46,13 @@ const FX_RATES = {
 // hours × this number, so the bb/100 figure and its confidence interval are
 // only ever as good as this estimate.
 //
-// 30 is the usual live full-ring rate. A 6-max game, a fast dealer or a
-// shot-clock room runs closer to 35-40; online is several times higher.
+// 20 suits an unhurried live full-ring game — a slow dealer, players who
+// tank, a table that talks. A brisk room runs nearer 30, a 6-max or
+// shot-clock game 35-40, and online several times higher.
+//
 // Changing it rescales bb/100 for every past session — it does not change
-// any money figure, which is measured, not estimated.
+// any money figure, which is measured, not estimated. Lowering it RAISES the
+// reported rate (the same profit over fewer hands), and widens the interval
+// by the same factor, so how much the number can be trusted is unchanged.
 // -----------------------------------------------------------------
-const HANDS_PER_HOUR = 30;
+const HANDS_PER_HOUR = 20;

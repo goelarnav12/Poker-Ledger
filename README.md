@@ -52,30 +52,41 @@ Also in `config.js`:
 
 ```js
 const BASE_CURRENCY = "INR";
-const FX_RATES = { INR: 1, HKD: 11.15 };
+const FX_RATES = { INR: 1, HKD: 11.15, USD: 96.5 };
 ```
 
 Sessions are stored in the currency you played in. Every total, both bar
 charts, and the Net Profit figure are converted to `BASE_CURRENCY` using these
 rates. The currency dropdown in the form is generated from these keys, so
-adding a currency here is the only change needed.
+**adding a currency here is the only change needed** — `stats.js` already
+carries symbols for USD, EUR, GBP, SGD, AUD, CAD and JPY, and anything without
+one falls back to its three-letter code. A few extras are commented out in
+`config.js`; uncomment what you play in and delete the rest, because an unused
+currency is just a longer dropdown.
 
-Rates are static, not live. Changing one restates every past session in that
-currency — fine for a ledger you read in one denomination, but be aware the
-historical numbers move.
+Rates are static, not live, and **changing one restates every past session in
+that currency**. That's fine for a ledger you read in one denomination, but the
+historical numbers move — so treat a rate edit as a deliberate act, not
+housekeeping. If you'd rather a past session kept the value it had at the time,
+the honest fix is to log it in the base currency at the rate you actually got.
 
 Also in `config.js`:
 
 ```js
-const HANDS_PER_HOUR = 30;
+const HANDS_PER_HOUR = 20;
 ```
 
 bb/100 is a rate per hundred hands, but a live ledger records hours — nobody
 counts hands at the table. Hands are estimated as `hours × HANDS_PER_HOUR`, so
-that figure is only ever as good as this number. 30 is the usual live full-ring
-rate; 6-max or a fast dealer runs 35–40. Changing it rescales bb/100 for every
-past session and changes **no money figure**, which is measured rather than
-estimated.
+that figure is only ever as good as this number. 20 suits an unhurried
+full-ring game; a brisk room is nearer 30, 6-max or a shot clock 35–40, online
+several times higher.
+
+Changing it rescales bb/100 for every past session and changes **no money
+figure**, which is measured rather than estimated. Lowering it *raises* the
+reported rate — the same profit spread over fewer hands — and widens the
+confidence interval by exactly the same factor, so how much the number can be
+trusted doesn't move. It only changes the unit it's quoted in.
 
 ### 4. Create your login
 

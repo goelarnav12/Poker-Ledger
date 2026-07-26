@@ -27,9 +27,9 @@ function baseCurrency(){ return ACTIVE_BASE; }
 
 // bb/100 is a per-hand rate, but this ledger records hours, not hands — nobody
 // counts hands in a live game. So hands are estimated as hours × this, and the
-// figure is only ever as good as the estimate. 30 is the usual live full-ring
-// number; a 6-max game or a fast dealer runs higher. Injectable so the tests
-// can pin it, same as the currency config.
+// figure is only ever as good as the estimate. Set in config.js; a slow live
+// full-ring game is around 20, a brisk one 30, 6-max or online higher.
+// Injectable so the tests can pin it, same as the currency config.
 let ACTIVE_HPH = typeof HANDS_PER_HOUR !== 'undefined' ? HANDS_PER_HOUR : 30;
 function setHandsPerHour(n){ ACTIVE_HPH = n; }
 function handsPerHour(){ return ACTIVE_HPH; }
