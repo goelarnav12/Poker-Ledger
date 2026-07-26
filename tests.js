@@ -241,6 +241,80 @@ check('rangeLabel names each range', ()=>{
   return rangeLabel('2026-02');
 });
 
+// ---------- exchange rates ----------
+check('a session with no rate recorded falls back to the current one', ()=>{
+  // Every row predating migration_006 is this case.
+  near(sessionRate(S('2026-01-01','1/2',100,'HKD')), 11.15);
+  near(sessionRate(S('2026-01-01','1/2',100)), 1, 'base currency');
+});
+check('a frozen rate beats the current one', ()=>{
+  const s = {...S('2026-03-28','5/10',7000,'HKD'), fxRate: 12.30};
+  near(sessionRate(s), 12.30);
+  near(profitBase(s), 86100, 'valued at its own rate, not config');
+});
+check('freezing is what stops history moving when rates change', ()=>{
+  const frozen = {...S('2026-03-28','5/10',7000,'HKD'), fxRate: 11.15};
+  const floating = S('2026-03-28','5/10',7000,'HKD');
+  near(profitBase(frozen), 78050, 'before');
+  near(profitBase(floating), 78050, 'before');
+  setCurrencyConfig({INR:1, HKD:12.30}, 'INR');       // the world moves on
+  near(profitBase(frozen), 78050, 'frozen session is unchanged');
+  near(profitBase(floating), 86100, 'unpinned session is revalued');
+  setCurrencyConfig({INR:1, HKD:11.15}, 'INR');       // restore for what follows
+});
+check('a nonsense frozen rate is ignored rather than trusted', ()=>{
+  for(const bad of [0, -1, NaN, Infinity, null, undefined, '12.3']){
+    near(sessionRate({...S('2026-01-01','1/2',100,'HKD'), fxRate: bad}), 11.15, String(bad));
+  }
+});
+check('a tournament converts at its own frozen rate', ()=>{
+  const st = tournamentStats([
+    {...T('2026-01-01','Macau Main',100,0,1,300), currency:'HKD', fxRate:12.30}
+  ]);
+  near(st.cost, 1230, 'cost');
+  near(st.winnings, 3690, 'winnings');
+  near(st.profit, 2460);
+});
+check('invertQuotes flips the API into base-per-unit', ()=>{
+  // Frankfurter quotes base->X. One rupee buys 0.01036 dollars, so one dollar
+  // is ~96.5 rupees. Flipping this the wrong way is a 10,000x error.
+  const r = invertQuotes({USD:0.01036, HKD:0.08122}, 'INR');
+  near(r.USD, 96.525, 'USD', 0.01);
+  near(r.HKD, 12.312, 'HKD', 0.01);
+  eq(r.INR, 1, 'the base is always 1 of itself');
+});
+check('invertQuotes drops quotes it cannot use', ()=>{
+  const r = invertQuotes({USD:0, HKD:-1, EUR:'x', GBP:null, SGD:0.0133}, 'INR');
+  eq('USD' in r, false); eq('HKD' in r, false);
+  eq('EUR' in r, false); eq('GBP' in r, false);
+  near(r.SGD, 75.19, 'the good one survives', 0.01);
+});
+check('invertQuotes survives an empty or absent payload', ()=>{
+  eq(Object.keys(invertQuotes({}, 'INR')).join(''), 'INR');
+  eq(Object.keys(invertQuotes(null, 'INR')).join(''), 'INR');
+});
+check('ratesFromPayload rejects a response with no usable quote', ()=>{
+  eq(ratesFromPayload(null, 'INR'), null);
+  eq(ratesFromPayload({rates:{}}, 'INR'), null, 'base alone is not rates');
+  eq(ratesFromPayload({rates:{USD:0}}, 'INR'), null, 'all quotes unusable');
+});
+check('ratesFromPayload keeps the date the rates are from', ()=>{
+  const r = ratesFromPayload({rates:{USD:0.01036}, date:'2026-07-24'}, 'INR');
+  eq(r.date, '2026-07-24');
+  eq(r.base, 'INR');
+  near(r.rates.USD, 96.525, 'USD', 0.01);
+  eq(typeof r.fetchedAt, 'number');
+});
+check('formatRate trims to four places and rejects nonsense', ()=>{
+  eq(formatRate(12.3), '12.3');
+  eq(formatRate(96.52509), '96.5251');
+  eq(formatRate(1), '1');
+  eq(formatRate(0), '');
+  eq(formatRate(-2), '');
+  eq(formatRate(NaN), '');
+  eq(formatRate(undefined), '');
+});
+
 // ---------- tournaments ----------
 check('a row with no session_type is a cash game', ()=>{
   const s = S('2026-01-01','1/2',500);
@@ -456,10 +530,10 @@ check('toCSV escapes a venue containing a comma or apostrophe', ()=>{
   const s = S('2026-01-01','1/2',100,'INR',"Pranshu's Game, Delhi");
   const line = toCSV([s]).split('\r\n')[1];
   eq(line.includes('"Pranshu\'s Game, Delhi"'), true, 'quoted venue');
-  // 17 columns, and the naive split finds 18 because it does not respect the
+  // 18 columns, and the naive split finds 19 because it does not respect the
   // quotes — which is the point: the comma survived instead of being stripped,
   // so a real CSV parser will put it back together as one field.
-  eq(line.split(',').length, 18, 'the embedded comma is still there, quoted');
+  eq(line.split(',').length, 19, 'the embedded comma is still there, quoted');
 });
 check('toCSV carries the tournament fields and the derived cost', ()=>{
   const t = T('2026-01-01','Sunday Main',1000,100,3,5000,{place:7, fieldSize:400});
@@ -469,9 +543,9 @@ check('toCSV carries the tournament fields and the derived cost', ()=>{
   eq(cells[3], 'Sunday Main', 'event name sits in the stakes column');
   eq(cells[5], '100', 'fee');
   eq(cells[6], '3', 'entries');
-  eq(cells[10], '7', 'place');
-  eq(cells[11], '400', 'field size');
-  eq(cells[12], 'deep tired', 'tags are space separated so they need no quoting');
+  eq(cells[11], '7', 'place');
+  eq(cells[12], '400', 'field size');
+  eq(cells[13], 'deep tired', 'tags are space separated so they need no quoting');
   eq(line.endsWith('3300,1700,1700'), true, 'total cost, profit, base profit');
 });
 check('toCSV leaves the tournament columns blank on a cash row', ()=>{
@@ -479,8 +553,19 @@ check('toCSV leaves the tournament columns blank on a cash row', ()=>{
   eq(cells[1], 'cash', 'type');
   eq(cells[5], '', 'fee');
   eq(cells[6], '', 'entries');
-  eq(cells[10], '', 'place');
-  eq(cells[12], '', 'tags');
+  eq(cells[11], '', 'place');
+  eq(cells[13], '', 'tags');
+});
+check('toCSV records the rate each row was valued at', ()=>{
+  const rows = toCSV([
+    {...S('2026-03-28','5/10',7000,'HKD'), fxRate:12.30},
+    S('2026-01-01','1/2',100),                    // no rate recorded
+  ]).split('\r\n');
+  eq(rows[0].split(',')[9], 'fx_rate', 'header');
+  // Oldest first, so the INR row comes before the March HKD one.
+  eq(rows[1].split(',')[9], '', 'blank means the row predates the column');
+  eq(rows[2].split(',')[9], '12.3', 'the frozen rate');
+  eq(rows[2].endsWith('7000,86100'), true, 'base column uses the frozen rate');
 });
 check('toCSV converts foreign currency in the base column', ()=>{
   const line = toCSV([S('2026-03-28','5/10',7000,'HKD','Venetian Macau')]).split('\r\n')[1];

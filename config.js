@@ -12,26 +12,36 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // -----------------------------------------------------------------
 // Currency
 //
-// Sessions are stored in whatever currency you played in. Totals, both
-// charts, and the Net Profit figure are converted to BASE_CURRENCY using
-// the rates below — "1 unit of this currency = N units of BASE_CURRENCY".
+// Sessions are stored in whatever currency you played in, and each one
+// remembers the rate it was saved at (see migration_006). That frozen rate is
+// what every total and chart converts with — so a session played in March
+// keeps its March value forever, and the all-time figure settles instead of
+// drifting with the market.
 //
-// These are static rates, not live ones. Editing a rate retroactively
-// restates every past session in that currency, which is what you want for
-// a ledger you read in one denomination, but it does mean the historical
-// numbers move when you update it. The dropdown in the add-session form is
-// built from these keys, so adding a currency here is all it takes.
+// THE MAP BELOW IS NO LONGER THE SOURCE OF TRUTH FOR VALUATION. Rates are
+// fetched live (rates.js) to prefill the form. This map now does two jobs:
+//
+//   1. It lists the currencies the dropdown offers. Adding a key is still the
+//      whole change needed to support a new one.
+//   2. Its numbers are the FALLBACK when the rate service can't be reached and
+//      nothing is cached — offline on a plane, say. The form flags it in red
+//      when it has fallen back to one of these, because a hand-typed rate can
+//      be months old.
+//
+// Editing a number here therefore no longer restates history. It only changes
+// what a NEW session is prefilled with when there's no network.
 // -----------------------------------------------------------------
-// Rates are "1 unit of this currency = N units of BASE_CURRENCY".
-// Adding a key here is the WHOLE change: the form's dropdown is built from
-// Object.keys(FX_RATES), and stats.js already knows the symbols for USD, EUR,
-// GBP, SGD, AUD, CAD and JPY. Uncomment or add whatever you actually play in —
-// an unused currency is just a longer dropdown.
+// "1 unit of this currency = N units of BASE_CURRENCY", used only as an
+// offline fallback. Adding a key is the whole change needed to offer a
+// currency; stats.js already knows the symbols for USD, EUR, GBP, SGD, AUD,
+// CAD and JPY, and anything else falls back to its three-letter code.
+// The rate service is asked for exactly these codes, so an unused currency is
+// a slower fetch as well as a longer dropdown.
 const BASE_CURRENCY = "INR";
 const FX_RATES = {
   INR: 1,
-  HKD: 11.15,   // stale: ~12.30 as of Jul 2026 — see the note in README
-  USD: 96.5,    // Jul 2026
+  HKD: 11.15,
+  USD: 96.5,
   // EUR: 112.0,
   // GBP: 129.0,
   // SGD: 75.0,

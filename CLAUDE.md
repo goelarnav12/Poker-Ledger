@@ -21,7 +21,9 @@ test belongs in `stats.js`**, and the tests pin their own FX rates via
 ## Architecture
 
 Single-page app, no framework, no modules — everything is global scope, loaded
-in order: `config.js` (Supabase + currency constants), `stats.js`, `app.js`.
+in order: `config.js` (Supabase + currency constants), `stats.js`, `rates.js`,
+`app.js`. The order is the dependency direction: `stats.js` reads nothing below
+it, `rates.js` may read config, and only `app.js` touches the DOM.
 
 The split is the point: **`stats.js` is pure** — no DOM, no network, no app
 state, every function deterministic. `app.js` owns the DOM, Supabase access and
@@ -137,19 +139,54 @@ list.
 ## Currency
 
 Sessions are stored in the currency they were played in (`sessions.currency`,
-ISO-4217-shaped). `BASE_CURRENCY` and `FX_RATES` in `config.js` are the single
-source of truth — the form's dropdown is built from `Object.keys(FX_RATES)`, so
-adding a currency there is the whole change.
+ISO-4217-shaped). `Object.keys(FX_RATES)` in `config.js` builds the dropdown,
+so adding a currency there is still the whole change.
 
-**Anything summing across sessions must go through `toBase()` first.** Only a
-single session's own figure is shown natively (`fmt(n, s.currency)`); the list
-row appends the base-converted value so the totals stay traceable.
+**The rate a session is valued at lives ON THE SESSION** (`fx_rate`,
+migration_006), frozen when it was saved. This is the invariant the whole
+feature exists for: rates are fetched live, so without pinning, a March
+session's rupee value would move every day and the all-time total would never
+be the same number twice.
+
+- **`toBaseFor(s, amount)` — not `toBase(amount, cur)` — for anything that
+  sums a session's money.** `toBase` uses the CURRENT rate and is right only
+  when there is no session in hand. `profitBase` and `tournamentStats` both go
+  through `toBaseFor`. Using the wrong one silently revalues history and no
+  test of a single session would catch it.
+- `sessionRate(s)` falls back to the current rate when `fxRate` is null — that
+  is every row predating migration_006, and it reproduces the old behaviour
+  exactly. It also rejects a non-positive or non-numeric rate rather than
+  trusting it into an Infinity.
+- `FX_RATES` is now a FALLBACK, not the source of truth. Editing a number
+  there changes what a new offline session is prefilled with; it restates
+  nothing.
+
 `stakesLabel()` qualifies non-base stakes as `5/10 (HKD)` — a 5/10 HKD game is
 not the 5/10 you'd read in rupees — and chart labels and filter chips both key
-off it so they stay consistent.
+off it so they stay consistent. A tournament skips the suffix, since its
+`stakes` is an event name.
 
-Rates are static and global. Editing one retroactively restates every past
-session in that currency.
+## rates.js
+
+Loaded between `stats.js` and `app.js`: it may read config, and `stats.js` must
+never read it. The only file that touches the FX network or localStorage, and
+it has **no top-level side effects**, which is what lets `tests.html` load it
+and test the pure parts with no network.
+
+- **`invertQuotes` is the dangerous function.** Frankfurter quotes
+  base→symbol (one rupee buys 0.01036 dollars); the app needs symbol→base.
+  Flipping it the wrong way understates a foreign session by four orders of
+  magnitude, which is why it is named, isolated and tested rather than a `1 /`
+  inside a fetch handler.
+- **Every failure path returns null and degrades**, never throws: fresh cache →
+  network → stale cache → `FX_RATES` → ask the user. Offline is a supported
+  state, not an error, and the form labels a config fallback in red because
+  that number can be months old.
+- Concurrent callers share one in-flight request (`inFlight`). The form asks on
+  open and on every currency change.
+- The service worker **skips `api.frankfurter.dev`** for the same reason it
+  skips Supabase: rates.js does its own caching with an age it understands, and
+  a second cache underneath would serve a rate the app believes is fresh.
 
 ## Hours
 
@@ -195,6 +232,7 @@ numbered `migration_NNN_*.sql`, run by hand in the same place:
 | `migration_003_hours.sql` | re-added `hours`, nullable, `check (hours > 0)` |
 | `migration_004_tournaments.sql` | `session_type`, plus `fee`/`entries`/`place`/`field_size` |
 | `migration_005_tags.sql` | `tags text[] not null default '{}'`, GIN index |
+| `migration_006_fx_rate.sql` | `fx_rate`, backfilled from the old static rates so history did not move |
 
 `import_sessions.sql` is a one-off backfill and is safe to re-run — it
 anti-joins on `(user_id, date, stakes)`. Its email is a placeholder set once via

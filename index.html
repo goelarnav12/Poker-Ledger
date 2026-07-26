@@ -177,6 +177,18 @@
             <!-- options are filled from FX_RATES in config.js -->
             <select id="f-currency"></select>
           </div>
+          <!-- Only shown for a foreign session. Prefilled from the live rate
+               and editable: what gets saved is what this session is valued at,
+               forever, so a bad rate at the cage can be recorded honestly. -->
+          <div class="field" id="rateField">
+            <label id="lbl-rate" for="f-rate">Rate</label>
+            <input type="number" step="0.0001" min="0" id="f-rate" placeholder="12.30">
+            <div class="rate-note" id="rateNote">
+              <span id="rateSource"></span>
+              <button type="button" class="rate-refresh" id="refreshRate"
+                      title="Fetch today's rate">↻</button>
+            </div>
+          </div>
           <div class="field">
             <label for="f-hours">Hours <span class="opt">optional</span></label>
             <input type="number" step="0.25" min="0" id="f-hours" placeholder="4.5">
@@ -229,6 +241,8 @@
 
 <script src="config.js"></script>
 <script src="stats.js"></script>
+<!-- rates.js sits between them: it may read config, stats must never read it. -->
+<script src="rates.js"></script>
 <script src="app.js"></script>
 <script>
   // Registered from the page, not app.js, so it runs regardless of auth state.

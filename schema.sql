@@ -14,9 +14,14 @@ create table if not exists sessions (
   -- entry — see `fee` and `entries` below, and `totalCost()` in stats.js.
   buy_in numeric not null,
   cash_out numeric not null,
-  -- Amounts above are denominated in this currency. The app converts to
-  -- BASE_CURRENCY for totals using the FX_RATES map in config.js.
+  -- Amounts above are denominated in this currency.
   currency text not null default 'INR' check (currency ~ '^[A-Z]{3}$'),
+  -- Units of BASE_CURRENCY per one unit of `currency`, FROZEN at the moment
+  -- the session was saved. Rates are fetched live, but only to prefill a new
+  -- session — pinning it here is what stops a March session's rupee value
+  -- drifting every day and the all-time total never settling.
+  -- Null means "not recorded"; those fall back to the current rate.
+  fx_rate numeric check (fx_rate is null or fx_rate > 0),
   -- Optional. A session without hours is excluded from the hourly rate rather
   -- than counted as zero, so leaving this null is a legitimate choice.
   hours numeric check (hours is null or hours > 0),

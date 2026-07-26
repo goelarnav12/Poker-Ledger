@@ -53,6 +53,25 @@ function rateFor(cur){
 
 function toBase(amount, cur){ return amount * rateFor(cur); }
 
+// The rate a SESSION is valued at, which is not necessarily today's.
+//
+// `fxRate` is frozen onto the row when the session is saved (migration_006).
+// That is what makes the ledger reproducible: rates are fetched live, so
+// without pinning, a March session's rupee value would move every day and the
+// all-time total would never settle. A row with no rate recorded — anything
+// predating the column — falls back to the current rate, which is exactly the
+// behaviour this app had before.
+function sessionRate(s){
+  const r = s.fxRate;
+  if(typeof r === 'number' && isFinite(r) && r > 0) return r;
+  return rateFor(s.currency);
+}
+
+// Convert one of a session's own amounts to the base currency, at that
+// session's rate. Anything summing a session's money must go through this
+// rather than toBase(), or it silently revalues history at today's rate.
+function toBaseFor(s, amount){ return amount * sessionRate(s); }
+
 // A row with no session_type is a cash game: every session predating
 // migration_004 is one, and the column defaults to 'cash' for the same reason.
 function isTournament(s){ return s.sessionType === 'tournament'; }
@@ -71,7 +90,7 @@ function totalCost(s){
 }
 
 function profitOf(s){ return s.cashOut - totalCost(s); }   // native currency
-function profitBase(s){ return toBase(profitOf(s), s.currency); }
+function profitBase(s){ return toBaseFor(s, profitOf(s)); }
 
 // You cashed if you got paid. Deliberately NOT derived from `place`, which is
 // optional — you always know whether money came back, you don't always record
@@ -311,8 +330,9 @@ function tournamentStats(list){
              itm:0, itmRate:0, bestPlace:null, entries:0, avgField:null };
   }
 
-  const cost     = t.reduce((a,s)=> a + toBase(totalCost(s), s.currency), 0);
-  const winnings = t.reduce((a,s)=> a + toBase(s.cashOut, s.currency), 0);
+  // Each tournament converts at its OWN frozen rate, not today's.
+  const cost     = t.reduce((a,s)=> a + toBaseFor(s, totalCost(s)), 0);
+  const winnings = t.reduce((a,s)=> a + toBaseFor(s, s.cashOut), 0);
   const itm      = t.filter(inTheMoney).length;
   const entries  = t.reduce((a,s)=> a + (typeof s.entries === 'number' && s.entries >= 1 ? s.entries : 1), 0);
 
@@ -423,7 +443,7 @@ function csvCell(v){
 // up, because the fee and the re-entries are invisible.
 function toCSV(list){
   const head = ['date','type','location','stakes','buy_in','fee','entries',
-                'cash_out','currency','hours','place','field_size','tags',
+                'cash_out','currency','fx_rate','hours','place','field_size','tags',
                 'notes','total_cost','profit','profit_' + ACTIVE_BASE.toLowerCase()];
   const num = v => (typeof v === 'number' && isFinite(v) ? v : '');
   const rows = chronological(list).map(s => [
@@ -433,6 +453,10 @@ function toCSV(list){
     s.buyIn,
     num(s.fee), num(s.entries),
     s.cashOut, s.currency,
+    // The rate actually used, so the base-currency column can be checked by
+    // hand. A blank here means the row predates the column and was valued at
+    // whatever the app's current rate was.
+    num(s.fxRate),
     num(s.hours),
     num(s.place), num(s.fieldSize),
     sessionTags(s).join(' '),      // space-separated: commas would need quoting

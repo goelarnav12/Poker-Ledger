@@ -55,20 +55,46 @@ const BASE_CURRENCY = "INR";
 const FX_RATES = { INR: 1, HKD: 11.15, USD: 96.5 };
 ```
 
-Sessions are stored in the currency you played in. Every total, both bar
-charts, and the Net Profit figure are converted to `BASE_CURRENCY` using these
-rates. The currency dropdown in the form is generated from these keys, so
-**adding a currency here is the only change needed** — `stats.js` already
-carries symbols for USD, EUR, GBP, SGD, AUD, CAD and JPY, and anything without
-one falls back to its three-letter code. A few extras are commented out in
-`config.js`; uncomment what you play in and delete the rest, because an unused
-currency is just a longer dropdown.
+Sessions are stored in the currency you played in. The dropdown is generated
+from these keys, so **adding a currency here is the only change needed** —
+`stats.js` already carries symbols for USD, EUR, GBP, SGD, AUD, CAD and JPY,
+and anything without one falls back to its three-letter code. A few extras are
+commented out; uncomment what you play in and delete the rest, since the rate
+service is asked for exactly these codes.
 
-Rates are static, not live, and **changing one restates every past session in
-that currency**. That's fine for a ledger you read in one denomination, but the
-historical numbers move — so treat a rate edit as a deliberate act, not
-housekeeping. If you'd rather a past session kept the value it had at the time,
-the honest fix is to log it in the base currency at the rate you actually got.
+**The numbers are only a fallback.** Rates are fetched live — see below.
+
+### How rates work
+
+Rates come from [Frankfurter](https://frankfurter.dev) (European Central Bank
+reference rates; no API key, no account, no cost), and are used **only to
+prefill the form**. When you save a session, the rate is written onto that row
+and never changes again.
+
+That freezing is the point. If totals used today's rate, the rupee value of a
+session played in March would move every single day and your all-time profit
+would never be the same number twice. Instead each session keeps what it was
+worth when you played it, so the ledger reconciles with a screenshot from last
+month.
+
+The rate field sits next to the currency picker on any non-base session:
+
+- **It's editable.** The cage gave you a worse rate than the market? Type what
+  you actually got. What you save is what that session is valued at.
+- **It says where the number came from** — `live rate · 24 Jul`, `cached
+  rate`, or a red `from config.js` when it couldn't reach the service. The ECB
+  publishes on working days only, so a Sunday fetch legitimately returns
+  Friday's rate and the date says so.
+- **↻ refetches.** A background refresh never overwrites a number you typed.
+- Session rows show the rate they were valued at (`≈ ₹78,050 @11.15`), so two
+  identical HK$7,000 wins reading differently is explained on the row rather
+  than being a mystery.
+
+Offline it falls back to the last cached rates (kept in `localStorage`, refreshed
+at most twice a day), and then to the static `FX_RATES` above. So the app is
+fully usable with no signal, which is the whole point of it being a PWA —
+editing `FX_RATES` now only affects that offline fallback, and no longer
+restates any history.
 
 Also in `config.js`:
 
@@ -198,8 +224,9 @@ cannot turn them red.
 |---|---|
 | `index.html` | Page structure |
 | `style.css` | Styling |
-| `config.js` | Your Supabase credentials and currency settings |
+| `config.js` | Your Supabase credentials, currency list, offline fallback rates |
 | `stats.js` | Pure logic: money, formatting, statistics. No DOM, no network. |
+| `rates.js` | Live exchange rates. The only file that fetches FX or uses localStorage. |
 | `app.js` | Auth, data access, rendering |
 | `tests.html` / `tests.js` | Test runner for `stats.js` |
 | `schema.sql` | Run once on a new project — current table shape |
@@ -208,6 +235,7 @@ cannot turn them red.
 | `migration_003_hours.sql` | Re-adds `hours`, nullable. Existing projects only. |
 | `migration_004_tournaments.sql` | Adds `session_type` and the tournament columns. Existing projects only. |
 | `migration_005_tags.sql` | Adds `tags`. Existing projects only. |
+| `migration_006_fx_rate.sql` | Adds `fx_rate` and backfills it. Existing projects only. |
 | `import_sessions.sql` | One-off backfill of historical sessions |
 
 `schema.sql` always describes the *current* shape of the table, so a fresh

@@ -311,6 +311,23 @@ h1{
    picker changes; the grid reflows around whatever is left visible. */
 .session-form:not(.tournament) .tourney-only{ display:none; }
 
+/* ---------- Exchange rate ---------- */
+/* Sits under the rate input and says where the number came from. A rate the
+   app could not fetch is worth flagging: it means the figure is whatever
+   config.js last said, which may be months old. */
+.rate-note{
+  display:flex; align-items:center; gap:6px;
+  margin-top:5px; font-family:var(--mono); font-size:10.5px;
+  color:var(--muted);
+}
+.rate-note .warn{ color:var(--loss); }
+.rate-refresh{
+  background:none; border:1px solid var(--rule-soft); border-radius:3px;
+  color:var(--muted); cursor:pointer; font-size:11px;
+  padding:1px 6px; line-height:1.4;
+}
+.rate-refresh:hover{ color:var(--text); border-color:var(--rule); }
+
 /* ---------- Tags ---------- */
 /* Previously-used tags, under the tag input. Toggling one edits the
    comma-separated field rather than replacing it. */

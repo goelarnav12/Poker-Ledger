@@ -71,6 +71,10 @@ async function enterApp(){
   appView.style.display = 'block';
   userEmailLabel.textContent = currentUser.email;
   showTab(location.hash.slice(1));   // restore the tab from the URL
+  // Warm the rate cache in the background. Deliberately not awaited: rates
+  // only prefill the form, so the ledger must never wait on the network to
+  // render — and offline it falls back to the cache, then to config.js.
+  void loadRates();
   await loadSessions();
 }
 
@@ -185,6 +189,9 @@ async function loadSessions(){
         // field below: an unrecorded finish is not a finish of zero.
         hours: r.hours == null ? null : Number(r.hours),
         notes: r.notes || '',
+        // Frozen at save time. Null on a row predating migration_006, which
+        // stats.js reads as "value it at the current rate".
+        fxRate: r.fx_rate == null ? null : Number(r.fx_rate),
         // A project that has not run migration_004 yet returns undefined here,
         // and 'cash' is the right reading of a row from before tournaments
         // existed — which is also why the column defaults to it.
@@ -216,6 +223,8 @@ function toRow(s){
     buy_in: s.buyIn,
     cash_out: s.cashOut,
     currency: s.currency,
+    // Always written, so the session's value is pinned the moment it is saved.
+    fx_rate: s.fxRate,
     hours: s.hours,          // null when left blank
     notes: s.notes,
     session_type: s.sessionType,
@@ -761,7 +770,11 @@ function renderList(){
       + tourneyDetail
       + (typeof s.hours === 'number' ? dim(s.hours + 'h') : '')
       + (multiVenue ? dim(escapeHtml(s.location)) : '')
-      + (s.currency === baseCurrency() ? '' : dim('≈ ' + fmt(Math.round(profitBase(s)))))
+      // The rate is shown alongside the converted figure so the arithmetic on
+      // this row can be checked, and so a session valued at an old rate is
+      // visibly valued at an old rate rather than mysteriously different.
+      + (s.currency === baseCurrency() ? ''
+         : dim('≈ ' + fmt(Math.round(profitBase(s))) + ' @' + formatRate(sessionRate(s))))
       + sessionTags(s).map(t=>` <span class="tag">#${escapeHtml(t)}</span>`).join('')
       + (s.notes ? dim(escapeHtml(s.notes)) : '');
 
@@ -825,8 +838,99 @@ currencySelect.innerHTML = Object.keys(FX_RATES)
 currencySelect.value = baseCurrency();
 
 const typeSelect = document.getElementById('f-type');
+const rateInput = document.getElementById('f-rate');
 
 function formIsTournament(){ return typeSelect.value === 'tournament'; }
+
+// ---------- Live rates ----------
+// The most recent rates snapshot, or null before the first fetch resolves.
+// Only ever used to PREFILL the rate field; it can never change what a saved
+// session is worth, because that rate lives on the row.
+let ratesSnapshot = null;
+
+const RATE_SOURCE_TEXT = {
+  live:    (d) => `live rate${d ? ' · ' + shortDate(d) : ''}`,
+  cached:  (d) => `cached rate${d ? ' · ' + shortDate(d) : ''}`,
+  config:  () => 'from config.js — could not reach the rate service',
+  unknown: () => 'no rate known — enter one by hand',
+  saved:   () => 'the rate this session was saved at',
+  base:    () => '',
+};
+
+// Whether the number in the box is the user's own. Tracked rather than
+// inferred from "is it non-empty", because a rate loaded off a saved session
+// is also non-empty and must not be described as edited.
+let rateTouched = false;
+
+function shortDate(iso){
+  const d = new Date(iso + 'T00:00:00');
+  return isNaN(d) ? iso : d.toLocaleDateString(undefined, {day:'numeric', month:'short'});
+}
+
+// Where the number currently in the field came from, for the note beneath it.
+let rateDisplay = { source: 'base', date: null };
+
+/** Show or hide the rate row, and describe where the number came from. */
+function renderRateField(source, date, edited){
+  const cur = currencySelect.value;
+  const foreign = cur !== baseCurrency();
+  document.getElementById('rateField').style.display = foreign ? '' : 'none';
+  if(!foreign) return;
+
+  document.getElementById('lbl-rate').textContent = `Rate · 1 ${cur} = ? ${baseCurrency()}`;
+  const note = document.getElementById('rateSource');
+  note.textContent = edited
+    ? 'edited — this session will be valued at your figure'
+    : (RATE_SOURCE_TEXT[source] || RATE_SOURCE_TEXT.unknown)(date);
+  note.className = source === 'config' || source === 'unknown' ? 'warn' : '';
+}
+
+/**
+ * Put a rate in the field for the currently selected currency.
+ *
+ * Never overwrites a rate the user typed, and never overwrites the rate an
+ * existing session was saved with — editing a session must not silently
+ * revalue it just because the form was opened on a different day.
+ */
+function fillRate({ force = false } = {}){
+  const cur = currencySelect.value;
+  if(cur === baseCurrency()){
+    rateInput.value = '';
+    rateDisplay = { source: 'base', date: null };
+    rateTouched = false;
+    renderRateField('base', null, false);
+    return;
+  }
+  // Leave a number that is already there alone — typed by hand, or loaded off
+  // a saved session. Only a currency change forces past this.
+  if(!force && rateInput.value.trim() !== ''){
+    renderRateField(rateDisplay.source, rateDisplay.date, rateTouched);
+    return;
+  }
+  const { rate, source, date } = prefillRate(cur, ratesSnapshot);
+  rateInput.value = formatRate(rate);
+  rateDisplay = { source, date };
+  rateTouched = false;
+  renderRateField(source, date, false);
+}
+
+/** Refresh the snapshot in the background, then reprice an untouched field. */
+async function loadRates({ force = false } = {}){
+  const snap = force ? await refreshRates() : await ensureRates();
+  if(snap) ratesSnapshot = snap;
+  // Only when the form is open and the user hasn't typed their own number.
+  if(form.classList.contains('open')) fillRate({ force });
+}
+
+document.getElementById('refreshRate').addEventListener('click', ()=>{
+  void loadRates({ force: true });
+});
+
+// Typing a rate makes it yours; the note stops claiming it came from the wire.
+rateInput.addEventListener('input', ()=>{
+  rateTouched = true;
+  renderRateField(rateDisplay.source, rateDisplay.date, true);
+});
 
 // Buy-in/cash-out are entered in the selected currency, so say which. The
 // wording changes with the format too: a tournament's buy-in is per entry and
@@ -850,6 +954,10 @@ currencySelect.addEventListener('change', updateAmountLabels);
 typeSelect.addEventListener('change', updateAmountLabels);
 updateAmountLabels();
 
+// Switching currency invalidates whatever rate was in the box — it belonged to
+// the old one — so this refill is forced past the "don't clobber typing" guard.
+currencySelect.addEventListener('change', ()=> fillRate({ force: true }));
+
 function todayLocal(){
   // valueAsDate reads back as UTC, which lands on the wrong day west of GMT.
   const now = new Date();
@@ -858,12 +966,13 @@ function todayLocal(){
 
 function clearFormFields(){
   ['f-location','f-stakes','f-buyin','f-cashout','f-hours','f-notes',
-   'f-fee','f-entries','f-place','f-field','f-tags'].forEach(id=>{
+   'f-fee','f-entries','f-place','f-field','f-tags','f-rate'].forEach(id=>{
     document.getElementById(id).value = '';
   });
   currencySelect.value = baseCurrency();
   typeSelect.value = 'cash';
   updateAmountLabels();   // setting .value in code fires no 'change' event
+  fillRate({ force: true });
 }
 
 // One form for both jobs; `session` null means "add", otherwise "edit".
@@ -888,11 +997,20 @@ function openForm(session){
     document.getElementById('f-tags').value = sessionTags(session).join(', ');
     document.getElementById('f-notes').value = session.notes;
     updateAmountLabels();
+    // The rate this session was SAVED at, not today's. Reopening a March
+    // session in July must not quietly revalue it — that is the whole reason
+    // the rate lives on the row.
+    rateInput.value = formatRate(session.fxRate ?? rateFor(session.currency));
+    rateDisplay = { source: session.fxRate ? 'saved' : 'config', date: null };
+    rateTouched = false;
+    renderRateField(rateDisplay.source, null, false);
   } else {
     clearFormFields();
     document.getElementById('f-date').value = todayLocal();
   }
 
+  // Refresh in the background; only an untouched, unsaved field gets repriced.
+  void loadRates();
   renderTagSuggestions();
   showFormError('');
   form.classList.add('open');
@@ -937,6 +1055,12 @@ form.addEventListener('submit', async (e)=>{
   const hours = rawHours === '' ? null : parseFloat(rawHours);
   const notes = document.getElementById('f-notes').value.trim();
   const tags = parseTags(document.getElementById('f-tags').value);
+  // The base currency is 1 of itself by definition; never store a user's typo
+  // for it. Everything else is pinned to whatever is in the field.
+  const rawRate = rateInput.value.trim();
+  const fxRate = currency === baseCurrency()
+    ? 1
+    : (rawRate === '' ? null : parseFloat(rawRate));
 
   // Same rule for all four: blank means not recorded, and only a tournament
   // records them at all.
@@ -961,6 +1085,12 @@ form.addEventListener('submit', async (e)=>{
   }
   if(buyIn < 0 || cashOut < 0){
     showFormError('Buy-in and cash-out are amounts, not results — neither can be negative. A losing session is a cash-out lower than the buy-in.');
+    return;
+  }
+  // A foreign session with no rate cannot be totalled, and guessing one later
+  // is how a ledger quietly stops adding up.
+  if(currency !== baseCurrency() && (fxRate === null || isNaN(fxRate) || fxRate <= 0)){
+    showFormError(`Enter the exchange rate for this session — how many ${baseCurrency()} one ${currency} was worth. Tap ↻ to fetch today's.`);
     return;
   }
   if(mtt){
@@ -990,7 +1120,7 @@ form.addEventListener('submit', async (e)=>{
   saveBtn.disabled = true;
   try {
     const payload = {date, location, stakes, buyIn, cashOut, currency, hours, notes,
-                     sessionType, fee, entries, place, fieldSize, tags};
+                     sessionType, fee, entries, place, fieldSize, tags, fxRate};
     const ok = editingId
       ? await updateSession(editingId, payload)
       : await addSession(payload);

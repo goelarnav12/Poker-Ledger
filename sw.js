@@ -9,7 +9,7 @@
 // Bump CACHE when the shell list changes; activate() deletes every other cache.
 // ---------------------------------------------------------------------------
 
-const CACHE = 'poker-ledger-v2';
+const CACHE = 'poker-ledger-v3';
 
 // Relative, never absolute: this is served from the domain root on Vercel but
 // from /Poker-Ledger/ on GitHub Pages, and absolute paths would break one.
@@ -19,6 +19,7 @@ const SHELL = [
   './style.css',
   './config.js',
   './stats.js',
+  './rates.js',
   './app.js',
   './manifest.webmanifest',
   './icon.svg',
@@ -56,6 +57,12 @@ self.addEventListener('fetch', event => {
   // either from a cache would show stale sessions or replay a stale token, so
   // these always go straight to the network.
   if (url.hostname.endsWith('.supabase.co')) return;
+
+  // The FX service does its own caching, in localStorage, with an age it
+  // understands. A second cache here would serve a rate the app believes is
+  // fresh when it isn't — and offline, rates.js already falls back to its own
+  // cached snapshot, so there is nothing for this one to rescue.
+  if (url.hostname === 'api.frankfurter.dev') return;
 
   event.respondWith(
     fetch(req)

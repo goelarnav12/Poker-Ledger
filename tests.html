@@ -31,6 +31,11 @@
   <!-- config.js is deliberately NOT loaded: tests pin their own rates via
        setCurrencyConfig() so retuning FX_RATES can't turn them red. -->
   <script src="stats.js"></script>
+  <!-- rates.js has no top-level side effects and never touches the network
+       until called, so loading it here costs nothing and lets the rate
+       inversion be tested — getting that backwards would understate a foreign
+       session by four orders of magnitude. config.js is still NOT loaded. -->
+  <script src="rates.js"></script>
   <script src="tests.js"></script>
 </body>
 </html>
