@@ -1,13 +1,15 @@
 // -----------------------------------------------------------------
-// Paste your own Supabase project values below.
-// Find them at: Supabase Dashboard -> Project Settings -> API Keys
-//   - SUPABASE_URL      = "Project URL"
-//   - SUPABASE_ANON_KEY = "Publishable key" (starts with sb_publishable_...)
-//                          (older projects: use the "anon" key from the
-//                          Legacy API Keys tab instead — works the same way)
+// Server
+//
+// The address of this app's own Cloudflare Worker (see worker/). It stores the
+// sessions; backend.js is the only file that calls it. The address is not a
+// secret — the sync password is what protects the ledger.
+//
+// Setting up your own copy: deploy worker/ with Wrangler, add your site's
+// address to ALLOWED_ORIGINS in worker/wrangler.toml, and paste the Worker's
+// URL here (no trailing slash). See README.md.
 // -----------------------------------------------------------------
-const SUPABASE_URL = "https://lkizapostyywexkmfjts.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxraXphcG9zdHl5d2V4a21manRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0ODUxMTAsImV4cCI6MjEwMDA2MTExMH0.DbbRFD04Ue30JFrHzsHLEwSnpDPir4s8EQvt359vxuE";
+const API_URL = "https://poker-ledger-api.goelarnav12.workers.dev";
 
 // -----------------------------------------------------------------
 // Currency

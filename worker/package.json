@@ -1,0 +1,17 @@
+{
+  "name": "poker-ledger-api",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:local": "wrangler d1 execute poker-ledger --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute poker-ledger --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260714.1",
+    "typescript": "~6.0.2",
+    "wrangler": "^4.0.0"
+  }
+}

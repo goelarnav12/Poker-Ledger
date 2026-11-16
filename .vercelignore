@@ -1,0 +1,2 @@
+# The Worker deploys to Cloudflare with Wrangler, not to Vercel.
+worker

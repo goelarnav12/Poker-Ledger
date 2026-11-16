@@ -10,41 +10,46 @@ cumulative chart cover both — but are **analysed separately**, because a
 tournament has no bb/100 and a cash game has no ROI. See
 [Formats](#formats) below.
 
-Your data lives in your own free Supabase database behind your own login, so it
-follows you across devices and nobody else can read it.
+Your data lives in your own free Cloudflare database (a Worker + D1) behind one
+password, so it follows you across devices and nobody else can read it.
 
-No build step, no package manager, no framework. Total cost: **$0**.
+No build step, no package manager and no framework for the site itself (the
+small server in `worker/` is deployed with Wrangler). Total cost: **$0**.
 
 ---
 
 ## Setup
 
-### 1. Create the database
+### 1. Deploy the server
 
-1. Sign up at [supabase.com](https://supabase.com) and click **New Project**.
-   Save the database password somewhere; pick a region near you.
-2. Open **SQL Editor → New Query**, paste the entire contents of
-   [`schema.sql`](schema.sql), and Run.
+The server is a small Cloudflare Worker with a D1 database, in
+[`worker/`](worker/). It only stores rows; every figure is computed in the
+browser. You need a free Cloudflare account and Node.
 
-   This creates the `sessions` table, an index, and four Row Level Security
-   policies that restrict every row to the account that created it.
+```sh
+cd worker
+npm install
+npx wrangler login
+npx wrangler d1 create poker-ledger      # prints a database_id
+```
+
+Paste that `database_id` into [`worker/wrangler.toml`](worker/wrangler.toml).
+In the same file, set `ALLOWED_ORIGINS` to the exact addresses your site is
+served from (comma-separated, no trailing slash). Only those pages may call the
+Worker. Then:
+
+```sh
+npm run db:remote     # creates the two tables from schema.sql
+npm run deploy        # prints the Worker's URL
+```
 
 ### 2. Connect the site
 
-**Project Settings → API Keys**, then copy two values into
-[`config.js`](config.js):
+Paste the Worker's URL into [`config.js`](config.js), with no trailing slash:
 
 ```js
-const SUPABASE_URL = "https://xxxxx.supabase.co";   // "Project URL"
-const SUPABASE_ANON_KEY = "sb_publishable_xxxx";    // "Publishable key"
+const API_URL = "https://poker-ledger-api.<your-subdomain>.workers.dev";
 ```
-
-The URL must be the `https://<ref>.supabase.co` API host — **not** the
-`supabase.com/dashboard/project/...` address in your browser bar. Using the
-dashboard URL makes every request fail.
-
-Older projects show a "Legacy API Keys" tab instead; the **anon** key there
-works identically.
 
 ### 3. Set your currencies
 
@@ -114,20 +119,26 @@ reported rate — the same profit spread over fewer hands — and widens the
 confidence interval by exactly the same factor, so how much the number can be
 trusted doesn't move. It only changes the unit it's quoted in.
 
-### 4. Create your login
+### 4. Set your password
 
-Serve the folder and sign up:
+Serve the folder and open it:
 
 ```sh
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-Supabase requires email confirmation by default. Either click the link it
-sends, or turn it off under **Authentication → Sign In / Providers → Email**.
+The first visit asks you to **set a password**. There is no email and no
+account: one ledger per Worker, and the first password set claims it for good.
+Every later visit, on any device, asks for that password once and then
+remembers it on that device until you press **Lock**.
 
-If you are hosting the site anywhere other than localhost, set
-**Authentication → URL Configuration → Site URL** to that address first, or
-the confirmation link will point at localhost and fail.
+**Forgotten the password?** There is no reset email. Clear the password row
+and set a new one; your sessions are untouched:
+
+```sh
+cd worker
+npx wrangler d1 execute poker-ledger --remote --command "delete from sync_meta"
+```
 
 ---
 
@@ -197,13 +208,9 @@ Plain static files, so any static host works: GitHub Pages (Settings → Pages �
 Deploy from a branch → `main` → `/ (root)`), Netlify Drop, Cloudflare Pages,
 Vercel.
 
-Two things to do once it is public:
-
-- Set the Supabase **Site URL** to your live address, as above.
-- Turn **off** new signups once your own account exists
-  (**Authentication → Sign In / Providers → Email**). Otherwise anyone who
-  finds the URL can create an account on your project. They could never read
-  your sessions — RLS prevents that — but they would consume your free tier.
+Once it is public, add the live address to `ALLOWED_ORIGINS` in
+`worker/wrangler.toml` and run `npm run deploy` in `worker/` again. A page
+served from an address that is not on that list cannot reach your ledger.
 
 ---
 
@@ -212,7 +219,7 @@ Two things to do once it is public:
 Open [`tests.html`](tests.html) in a browser. Reload to re-run.
 
 It exercises the pure functions in `stats.js` — currency conversion,
-formatting, and every statistic — with no network, no Supabase, and no
+formatting, and every statistic — with no network, no server, and no
 framework. Currency rates are pinned inside the tests, so retuning `FX_RATES`
 cannot turn them red.
 
@@ -224,23 +231,14 @@ cannot turn them red.
 |---|---|
 | `index.html` | Page structure |
 | `style.css` | Styling |
-| `config.js` | Your Supabase credentials, currency list, offline fallback rates |
+| `config.js` | The Worker's URL, currency list, offline fallback rates |
 | `stats.js` | Pure logic: money, formatting, statistics. No DOM, no network. |
-| `rates.js` | Live exchange rates. The only file that fetches FX or uses localStorage. |
-| `app.js` | Auth, data access, rendering |
+| `rates.js` | Live exchange rates. The only file that fetches FX. |
+| `backend.js` | The only file that talks to the server: password, load, save |
+| `app.js` | Lock screen, data layer, rendering |
 | `tests.html` / `tests.js` | Test runner for `stats.js` |
-| `schema.sql` | Run once on a new project — current table shape |
-| `migration_001_currency.sql` | Adds `currency`, drops `hours`. Existing projects only. |
-| `migration_002_index.sql` | Adds the `(user_id, date)` index. Existing projects only. |
-| `migration_003_hours.sql` | Re-adds `hours`, nullable. Existing projects only. |
-| `migration_004_tournaments.sql` | Adds `session_type` and the tournament columns. Existing projects only. |
-| `migration_005_tags.sql` | Adds `tags`. Existing projects only. |
-| `migration_006_fx_rate.sql` | Adds `fx_rate` and backfills it. Existing projects only. |
-| `import_sessions.sql` | One-off backfill of historical sessions |
-
-`schema.sql` always describes the *current* shape of the table, so a fresh
-project needs only that file — the migrations exist to bring older projects up
-to date, and running them on a new project does nothing.
+| `worker/` | The Cloudflare Worker + D1 server, deployed with Wrangler |
+| `schema.sql`, `migration_*.sql`, `import_sessions.sql` | The old Supabase (Postgres) schema, from before the move to Cloudflare in Nov 2026. Reference only; nothing runs them. |
 
 The two structural rules worth keeping: anything deterministic enough to test
 belongs in `stats.js`, and anything that sums across sessions must convert to
@@ -250,11 +248,14 @@ the base currency first.
 
 ## Security
 
-The publishable/anon key is designed to be public; it is safe in source code
-and in this repository. What actually protects your data is Row Level Security
-— the four policies in `schema.sql` restrict every read and write to rows where
-`user_id` matches the logged-in account.
+One password protects the ledger. It never leaves your browser: it is stretched
+with PBKDF2 (650,000 rounds) into a token, and only that token is sent. The
+server stores a hash of the token, so even a copy of its database does not let
+anyone sign in.
 
-Those policies are the only thing standing between your data and anyone with
-the key. Never weaken them, and never put a **service role** key in
-`config.js`; that one bypasses RLS entirely.
+The Worker's URL in `config.js` is not a secret. The Worker also only answers
+pages served from the addresses in `ALLOWED_ORIGINS`.
+
+Sessions are stored as readable JSON on your own Cloudflare account, not
+encrypted. That is a deliberate trade: it is what lets a forgotten password be
+reset without losing the data.

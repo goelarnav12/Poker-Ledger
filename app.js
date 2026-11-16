@@ -5,8 +5,6 @@
 // ---------------------------------------------------------------------------
 
 // ---------- Setup ----------
-let client = null;
-let currentUser = null;
 let sessions = [];
 let activeFilter = 'all';       // stakes chip
 let activeLocation = 'all';     // venue chip
@@ -15,61 +13,68 @@ let activeType = 'all';         // 'all' | 'cash' | 'tournament'
 let activeTag = 'all';          // a tag string, or 'all'
 let editingId = null;           // non-null while the form is editing a session
 let profitChart, stakesChart, monthlyChart;
+// 'login' once a password exists on the server, 'signup' before that. Decided
+// by showAuth(); it only changes what the one button on the lock screen does.
+let authMode = 'login';
 
 const authView = document.getElementById('authView');
 const appView = document.getElementById('app');
 const authError = document.getElementById('authError');
-const userEmailLabel = document.getElementById('userEmailLabel');
+const authTitle = document.getElementById('authTitle');
+const authPassword = document.getElementById('auth-password');
+const authConfirm = document.getElementById('auth-confirm');
+const authConfirmField = document.getElementById('authConfirmField');
+const signInBtn = document.getElementById('signInBtn');
 const configWarning = document.getElementById('configWarning');
 const listStatus = document.getElementById('listStatus');
 const loadingNote = document.getElementById('loadingNote');
 
 function configIsPlaceholder(){
-  return !SUPABASE_URL || !SUPABASE_ANON_KEY ||
-    SUPABASE_URL.includes('PASTE_YOUR') || SUPABASE_ANON_KEY.includes('PASTE_YOUR');
+  return typeof API_URL !== 'string' || !API_URL || API_URL.includes('PASTE_YOUR');
 }
 
+// The token is kept in localStorage (backend.js), so a returning visit goes
+// straight in. Whether it is still valid is only discovered by the first pull:
+// a 401 there locks the app again (see loadSessions).
 async function boot(){
   if(configIsPlaceholder()){
     configWarning.style.display = 'block';
     return;
   }
-  client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if(isSignedIn()) await enterApp();
+  else await showAuth();
+}
 
-  const { data: { session } } = await client.auth.getSession();
-  if(session){
-    currentUser = session.user;
-    await enterApp();
-  } else {
-    authView.style.display = 'flex';
+// Show the lock screen. Asks the server whether a password exists yet, which
+// decides between "Unlock" and "Set password".
+async function showAuth(message){
+  appView.style.display = 'none';
+  authView.style.display = 'flex';
+  authPassword.value = '';
+  authConfirm.value = '';
+  authError.style.color = 'var(--loss)';
+  authError.textContent = message || '';
+  try {
+    setAuthMode((await getSalt()) ? 'login' : 'signup');
+  } catch(e){
+    // Offline or the Worker is unreachable. Default to unlock; pressing the
+    // button surfaces the real error.
+    setAuthMode('login');
   }
+}
 
-  client.auth.onAuthStateChange((event, session)=>{
-    if(event === 'SIGNED_IN' && session){
-      // SIGNED_IN also fires on token refresh and tab focus; ignore it when it
-      // is the same user we already loaded, otherwise every refresh re-fetches.
-      if(currentUser && currentUser.id === session.user.id) return;
-      currentUser = session.user;
-      enterApp();
-    } else if(event === 'SIGNED_OUT'){
-      currentUser = null;
-      sessions = [];
-      activeFilter = 'all';
-      activeLocation = 'all';
-      activeRange = 'all';
-      activeType = 'all';
-      activeTag = 'all';
-      closeForm();
-      appView.style.display = 'none';
-      authView.style.display = 'flex';
-    }
-  });
+function setAuthMode(mode){
+  authMode = mode;
+  const signup = mode === 'signup';
+  authTitle.textContent = signup ? 'Set a password' : 'Unlock';
+  signInBtn.textContent = signup ? 'Set password' : 'Unlock';
+  authConfirmField.style.display = signup ? '' : 'none';
+  authPassword.autocomplete = signup ? 'new-password' : 'current-password';
 }
 
 async function enterApp(){
   authView.style.display = 'none';
   appView.style.display = 'block';
-  userEmailLabel.textContent = currentUser.email;
   showTab(location.hash.slice(1));   // restore the tab from the URL
   // Warm the rate cache in the background. Deliberately not awaited: rates
   // only prefill the form, so the ledger must never wait on the network to
@@ -78,50 +83,79 @@ async function enterApp(){
   await loadSessions();
 }
 
-// ---------- Auth actions ----------
-// boot() bails out before creating `client` when config.js is unedited, so the
-// auth buttons have to survive being clicked with no client.
-function requireClient(){
-  if(client) return true;
-  authError.style.color = 'var(--loss)';
-  authError.textContent = 'Supabase is not configured yet — fill in config.js.';
-  return false;
+// Forget the token and everything loaded with it, then show the lock screen.
+async function lockApp(message){
+  signOut();
+  sessions = [];
+  activeFilter = 'all';
+  activeLocation = 'all';
+  activeRange = 'all';
+  activeType = 'all';
+  activeTag = 'all';
+  closeForm();
+  await showAuth(message);
 }
 
-document.getElementById('signUpBtn').addEventListener('click', async ()=>{
-  if(!requireClient()) return;
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
-  authError.style.color = 'var(--ink-soft)';
-  authError.textContent = '';
-  if(!email || password.length < 6){
-    authError.style.color = 'var(--loss)';
-    authError.textContent = 'Enter an email and a password of at least 6 characters.';
-    return;
-  }
-  const { data, error } = await client.auth.signUp({ email, password });
-  if(error){
-    authError.style.color = 'var(--loss)';
-    authError.textContent = error.message;
-    return;
-  }
-  if(!data.session){
-    authError.textContent = 'Account created — check your email to confirm, then log in.';
-  }
-});
-
-document.getElementById('signInBtn').addEventListener('click', async ()=>{
-  if(!requireClient()) return;
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
+// ---------- Auth actions ----------
+async function submitAuth(){
+  const password = authPassword.value;
   authError.style.color = 'var(--loss)';
   authError.textContent = '';
-  const { error } = await client.auth.signInWithPassword({ email, password });
-  if(error){ authError.textContent = error.message; }
-});
+  if(configIsPlaceholder()){
+    authError.textContent = 'The server is not configured yet — fill in config.js.';
+    return;
+  }
+  if(authMode === 'signup'){
+    if(password.length < 8){
+      authError.textContent = 'Choose a password of at least 8 characters.';
+      return;
+    }
+    if(password !== authConfirm.value){
+      authError.textContent = 'The two passwords do not match.';
+      return;
+    }
+  } else if(!password){
+    authError.textContent = 'Enter your password.';
+    return;
+  }
 
-document.getElementById('signOutBtn').addEventListener('click', async ()=>{
-  await client.auth.signOut();
+  signInBtn.disabled = true;
+  // Stretching the password is deliberately slow (about a second), so say so.
+  authError.style.color = 'var(--ink-soft)';
+  authError.textContent = authMode === 'signup' ? 'Setting up…' : 'Unlocking…';
+  try {
+    if(authMode === 'signup') await signup(password);
+    else await login(password);
+    authPassword.value = '';
+    authConfirm.value = '';
+    authError.textContent = '';
+    await enterApp();
+  } catch(e){
+    console.error(e);
+    authError.style.color = 'var(--loss)';
+    if(e instanceof BackendError && e.status === 401){
+      authError.textContent = 'Wrong password.';
+    } else if(e instanceof BackendError && e.status === 409){
+      // Someone (you, on another device) set the password a moment ago.
+      setAuthMode('login');
+      authError.textContent = 'This ledger already has a password. Unlock it instead.';
+    } else if(e instanceof BackendError){
+      authError.textContent = e.message;
+    } else {
+      authError.textContent = 'Could not reach the server. Check your connection and try again.';
+    }
+  } finally {
+    signInBtn.disabled = false;
+  }
+}
+
+signInBtn.addEventListener('click', submitAuth);
+for(const el of [authPassword, authConfirm]){
+  el.addEventListener('keydown', e => { if(e.key === 'Enter') submitAuth(); });
+}
+
+document.getElementById('signOutBtn').addEventListener('click', ()=>{
+  void lockApp();
 });
 
 // ---------- Export ----------
@@ -159,114 +193,172 @@ function setLoading(on){
 // ---------- Data layer ----------
 // No local cache and no optimistic updates: every mutation is followed by a
 // full reload. The data volume is a personal ledger, so this stays cheap.
+//
+// The server (backend.js → the Worker) stores each session whole, as JSON, in
+// the same camelCase shape the app uses — so there is no field translation
+// here any more. A stored row is the app's session plus four bookkeeping keys:
+// `id`, `createdAt`, `updatedAt` and `deletedAt`.
+const SESSIONS_TABLE = 'sessions';
+
+// Null stays null — it means "not recorded", which is not the same as zero and
+// must not become 0. Same rule for hours and every tournament field: an
+// unrecorded finish is not a finish of zero.
+function numOrNull(v){
+  return v == null ? null : Number(v);
+}
+
+// One stored payload → one in-memory session. Defensive on purpose: this is
+// the single gate everything read from the server passes through.
+function fromStored(r){
+  return {
+    id: r.id,
+    date: r.date,
+    location: r.location,
+    stakes: r.stakes,
+    buyIn: Number(r.buyIn),
+    cashOut: Number(r.cashOut),
+    currency: r.currency || baseCurrency(),
+    hours: numOrNull(r.hours),
+    notes: r.notes || '',
+    // Frozen at save time. Null on a row from before rates were pinned, which
+    // stats.js reads as "value it at the current rate".
+    fxRate: numOrNull(r.fxRate),
+    // 'cash' is the right reading of a row from before tournaments existed.
+    sessionType: r.sessionType || 'cash',
+    fee: numOrNull(r.fee),
+    entries: numOrNull(r.entries),
+    place: numOrNull(r.place),
+    fieldSize: numOrNull(r.fieldSize),
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    // Carried so an edit or a delete can write the row back with its original
+    // creation time. Nothing on screen reads it.
+    createdAt: r.createdAt || null
+  };
+}
+
 async function loadSessions(){
   setLoading(true);
+  let locked = false;
   try {
-    // Supabase reports most failures as { error }, but a genuine network
-    // failure (offline, DNS, CORS) throws instead. Without this catch that
-    // rejection escapes and the user is left staring at an empty page.
-    const { data, error } = await client
-      .from('sessions')
-      .select('*')
-      .order('date', { ascending: true });
-
-    if(error){
-      console.error(error);
-      sessions = [];
-      showListStatus('Could not load sessions: ' + error.message);
-    } else {
-      showListStatus('');
-      sessions = data.map(r => ({
-        id: r.id,
-        date: r.date,
-        location: r.location,
-        stakes: r.stakes,
-        buyIn: Number(r.buy_in),
-        cashOut: Number(r.cash_out),
-        currency: r.currency || baseCurrency(),
-        // Null stays null — it means "not recorded", which is not the same as
-        // zero and must not become 0 here. Same rule for every tournament
-        // field below: an unrecorded finish is not a finish of zero.
-        hours: r.hours == null ? null : Number(r.hours),
-        notes: r.notes || '',
-        // Frozen at save time. Null on a row predating migration_006, which
-        // stats.js reads as "value it at the current rate".
-        fxRate: r.fx_rate == null ? null : Number(r.fx_rate),
-        // A project that has not run migration_004 yet returns undefined here,
-        // and 'cash' is the right reading of a row from before tournaments
-        // existed — which is also why the column defaults to it.
-        sessionType: r.session_type || 'cash',
-        fee: r.fee == null ? null : Number(r.fee),
-        entries: r.entries == null ? null : Number(r.entries),
-        place: r.place == null ? null : Number(r.place),
-        fieldSize: r.field_size == null ? null : Number(r.field_size),
-        tags: Array.isArray(r.tags) ? r.tags : []
-      }));
-    }
+    const records = await pullRecords(SESSIONS_TABLE);
+    showListStatus('');
+    sessions = records
+      // A tombstone is a deleted session; it stays on the server but never
+      // reaches the screen.
+      .filter(rec => !rec.deletedAt)
+      .map(rec => fromStored({ ...JSON.parse(rec.payload), id: rec.id }))
+      // Oldest first. Same-day sessions keep the order they were entered in.
+      .sort((a, b) =>
+        a.date < b.date ? -1 : a.date > b.date ? 1 :
+        String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
   } catch(e){
     console.error(e);
     sessions = [];
-    showListStatus('Could not reach the database. Check your connection, then reload.');
+    if(e instanceof BackendError && e.status === 401){
+      // The saved token no longer opens the ledger (the password was changed
+      // or reset). Go back to the lock screen rather than show an empty app.
+      locked = true;
+    } else if(e instanceof BackendError){
+      showListStatus('Could not load sessions: ' + e.message);
+    } else {
+      showListStatus('Could not reach the server. Check your connection, then reload.');
+    }
   } finally {
     setLoading(false);
+  }
+  if(locked){
+    await lockApp('Your saved sign-in is no longer valid. Enter the password again.');
+    return;
   }
   render();
 }
 
-// camelCase in JS, snake_case in Postgres. This function and loadSessions()
-// are the only places that translation happens — keep it that way.
-function toRow(s){
+// The app's session → the row that is stored. `meta` supplies the bookkeeping
+// keys. This and fromStored() are the only places a stored row is shaped.
+function toStored(s, meta){
+  const tournament = s.sessionType === 'tournament';
   return {
+    id: meta.id,
     date: s.date,
     location: s.location,
     stakes: s.stakes,
-    buy_in: s.buyIn,
-    cash_out: s.cashOut,
+    buyIn: s.buyIn,
+    cashOut: s.cashOut,
     currency: s.currency,
     // Always written, so the session's value is pinned the moment it is saved.
-    fx_rate: s.fxRate,
+    fxRate: s.fxRate,
     hours: s.hours,          // null when left blank
     notes: s.notes,
-    session_type: s.sessionType,
-    // Explicitly nulled on a cash row rather than left off the object: editing
-    // a tournament back into a cash game has to CLEAR these, and an omitted
-    // key in a Supabase update leaves the old value in place.
-    fee:        s.sessionType === 'tournament' ? s.fee : null,
-    entries:    s.sessionType === 'tournament' ? s.entries : null,
-    place:      s.sessionType === 'tournament' ? s.place : null,
-    field_size: s.sessionType === 'tournament' ? s.fieldSize : null,
-    tags: s.tags
+    sessionType: s.sessionType,
+    // Explicitly nulled on a cash row: editing a tournament back into a cash
+    // game has to CLEAR these.
+    fee:       tournament ? s.fee : null,
+    entries:   tournament ? s.entries : null,
+    place:     tournament ? s.place : null,
+    fieldSize: tournament ? s.fieldSize : null,
+    tags: s.tags,
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    deletedAt: meta.deletedAt
   };
 }
 
+function saveErrorMessage(e){
+  return e instanceof BackendError ? e.message : 'could not reach the server';
+}
+
 async function addSession(s){
-  const { error } = await client.from('sessions')
-    .insert({ user_id: currentUser.id, ...toRow(s) });
-  if(error){
-    showFormError('Could not save session: ' + error.message);
+  // The browser makes the id and the timestamps; the server only stores them.
+  const now = new Date().toISOString();
+  try {
+    await pushRecord(SESSIONS_TABLE, toStored(s, {
+      id: crypto.randomUUID(), createdAt: now, updatedAt: now, deletedAt: null
+    }));
+    return true;
+  } catch(e){
+    console.error(e);
+    showFormError('Could not save session: ' + saveErrorMessage(e));
     return false;
   }
-  return true;
 }
 
-// user_id is deliberately not sent: leaving it untouched is what keeps the row
-// yours, and the update policy's `with check` would reject changing it anyway.
+// The whole row is rewritten with a fresh `updatedAt`; the server keeps the
+// copy with the later one.
 async function updateSession(id, s){
-  const { error } = await client.from('sessions').update(toRow(s)).eq('id', id);
-  if(error){
-    showFormError('Could not update session: ' + error.message);
+  const existing = sessions.find(x => x.id === id);
+  const now = new Date().toISOString();
+  try {
+    await pushRecord(SESSIONS_TABLE, toStored(s, {
+      id, createdAt: (existing && existing.createdAt) || now, updatedAt: now, deletedAt: null
+    }));
+    return true;
+  } catch(e){
+    console.error(e);
+    showFormError('Could not update session: ' + saveErrorMessage(e));
     return false;
   }
-  return true;
 }
 
+// A soft delete: the row is kept on the server with `deletedAt` set (a
+// tombstone) and loadSessions() filters it out. In the app it is still gone
+// for good — there is no undo button.
 async function deleteSession(id){
-  const { error } = await client.from('sessions').delete().eq('id', id);
-  if(error){
-    showListStatus('Could not delete session: ' + error.message);
+  const existing = sessions.find(x => x.id === id);
+  if(!existing){
+    showListStatus('Could not delete session: it is no longer in the list. Reload and try again.');
     return false;
   }
-  return true;
+  const now = new Date().toISOString();
+  try {
+    await pushRecord(SESSIONS_TABLE, toStored(existing, {
+      id, createdAt: existing.createdAt || now, updatedAt: now, deletedAt: now
+    }));
+    return true;
+  } catch(e){
+    console.error(e);
+    showListStatus('Could not delete session: ' + saveErrorMessage(e));
+    return false;
+  }
 }
 
 // ---------- Tabs ----------

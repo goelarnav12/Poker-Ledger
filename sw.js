@@ -9,7 +9,7 @@
 // Bump CACHE when the shell list changes; activate() deletes every other cache.
 // ---------------------------------------------------------------------------
 
-const CACHE = 'poker-ledger-v3';
+const CACHE = 'poker-ledger-v4';
 
 // Relative, never absolute: this is served from the domain root on Vercel but
 // from /Poker-Ledger/ on GitHub Pages, and absolute paths would break one.
@@ -18,6 +18,7 @@ const SHELL = [
   './index.html',
   './style.css',
   './config.js',
+  './backend.js',
   './stats.js',
   './rates.js',
   './app.js',
@@ -53,10 +54,10 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(req.url);
 
-  // Supabase carries the ledger itself and the auth token exchange. Serving
-  // either from a cache would show stale sessions or replay a stale token, so
-  // these always go straight to the network.
-  if (url.hostname.endsWith('.supabase.co')) return;
+  // The Worker carries the ledger itself and the password check. Serving
+  // either from a cache would show stale sessions, so these always go straight
+  // to the network. (localhost:8787 is the Worker under `wrangler dev`.)
+  if (url.hostname.endsWith('.workers.dev') || url.host === 'localhost:8787') return;
 
   // The FX service does its own caching, in localStorage, with an age it
   // understands. A second cache here would serve a rate the app believes is
@@ -68,7 +69,7 @@ self.addEventListener('fetch', event => {
     fetch(req)
       .then(res => {
         // Cross-origin CDN responses are opaque; still worth storing so the
-        // charts and Supabase SDK are available offline.
+        // charts are available offline.
         const copy = res.clone();
         caches.open(CACHE).then(cache => cache.put(req, copy)).catch(() => {});
         return res;

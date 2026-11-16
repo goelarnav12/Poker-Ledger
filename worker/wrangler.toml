@@ -1,0 +1,15 @@
+name = "poker-ledger-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+# Origins allowed to call this Worker, exact match, comma-separated.
+#
+# Only stable aliases belong here. Per-deployment Vercel URLs change on every
+# deploy, and preview deployments deliberately get no access to your ledger.
+[vars]
+ALLOWED_ORIGINS = "http://localhost:8000,https://poker-ledger-phi.vercel.app,https://goelarnav12.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "poker-ledger"
+database_id = "883bfe2a-d9fc-4843-bfde-f9023a629c7b"

@@ -23,7 +23,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <!-- Two families only: Fraunces for display and figures, Plex Mono for labels. -->
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <!-- date adapter: required by the profit chart's `scales.x.type: 'time'` -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -39,27 +38,27 @@
 
   <!-- Config warning shown if config.js still has placeholder values -->
   <div class="notice" id="configWarning" style="display:none;">
-    <strong>Setup needed:</strong> open <code>config.js</code> and paste in your Supabase project URL and publishable key. See README.md for step-by-step instructions.
+    <strong>Setup needed:</strong> open <code>config.js</code> and paste in your Worker URL (<code>API_URL</code>). See README.md for step-by-step instructions.
   </div>
 
-  <!-- Auth screen -->
+  <!-- Lock screen: one password, no email. app.js switches it between
+       "Unlock" and "Set a password" depending on whether one exists yet. -->
   <div class="auth-view" id="authView" style="display:none;">
     <div class="auth-card">
-      <div class="rule-title">Sign in</div>
-      <div class="field">
-        <label for="auth-email">Email</label>
-        <input type="email" id="auth-email" placeholder="you@email.com" autocomplete="email">
-      </div>
+      <div class="rule-title" id="authTitle">Unlock</div>
       <div class="field">
         <label for="auth-password">Password</label>
-        <input type="password" id="auth-password" placeholder="At least 6 characters" autocomplete="current-password">
+        <input type="password" id="auth-password" autocomplete="current-password">
+      </div>
+      <div class="field" id="authConfirmField" style="display:none;">
+        <label for="auth-confirm">Password again</label>
+        <input type="password" id="auth-confirm" autocomplete="new-password">
       </div>
       <div class="auth-error" id="authError" role="alert" aria-live="polite"></div>
       <div class="auth-actions">
-        <button class="btn-primary" id="signInBtn">Log In</button>
-        <button class="btn-quiet" id="signUpBtn">Sign Up</button>
+        <button class="btn-primary" id="signInBtn">Unlock</button>
       </div>
-      <p class="fineprint">Your sessions are private to your account.</p>
+      <p class="fineprint">Your sessions are private behind this password.</p>
     </div>
   </div>
 
@@ -229,10 +228,10 @@
     </section>
 
     <footer class="footer">
-      <span id="userEmailLabel"></span>
+      <span></span>
       <span class="footer-actions">
         <button class="btn-quiet" id="exportBtn" title="Download every session as CSV">Export CSV</button>
-        <button class="btn-quiet" id="signOutBtn">Sign out</button>
+        <button class="btn-quiet" id="signOutBtn" title="Forget the password on this device">Lock</button>
       </span>
     </footer>
 
@@ -240,6 +239,8 @@
 </div>
 
 <script src="config.js"></script>
+<!-- backend.js is the only file that talks to the server. It reads config. -->
+<script src="backend.js"></script>
 <script src="stats.js"></script>
 <!-- rates.js sits between them: it may read config, stats must never read it. -->
 <script src="rates.js"></script>
