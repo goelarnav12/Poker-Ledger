@@ -83,7 +83,7 @@ are the only places a stored row is shaped. Keep it there.
 - **A delete is a tombstone** (`deletedAt` set), pushed like any other row and
   filtered out in `loadSessions()`. In the UI it is still permanent.
 - **No field is validated server-side.** The form's checks in `app.js` are the
-  only ones; the Postgres check constraints are gone.
+  only ones.
 
 Lists are built as HTML strings with listeners re-attached afterwards. Any
 user-supplied value interpolated into a template must go through
@@ -257,10 +257,6 @@ it. A generic store: one `records` table, each session's full JSON as
   request from it fails with "Origin not allowed".
 - **Password reset** is `delete from sync_meta` via `wrangler d1 execute`; the
   records are untouched and the next visit shows "Set a password".
-- Nothing pauses on inactivity, unlike the Supabase project this replaced.
-
-Moved off Supabase in Nov 2026. The root `schema.sql`, `migration_*.sql` and
-`import_sessions.sql` are that era's Postgres schema, reference only.
 
 ## Deploy
 
@@ -271,7 +267,7 @@ Two live hosts, both from `main`:
   filenames are not content-hashed; a long max-age means a stale `app.js`.
   Deliberately **no SPA rewrite** (unlike Health_tracker): tabs are hash-based,
   so nothing needs a server-side fallback, and a catch-all would endanger
-  `tests.html` and the `.sql` files.
+  `tests.html`.
 - **GitHub Pages** — served from `/Poker-Ledger/`, not a domain root.
 - **The Worker** does NOT deploy on push. Changes under `worker/` need
   `npm run deploy` there. `.vercelignore` keeps `worker/` off Vercel.

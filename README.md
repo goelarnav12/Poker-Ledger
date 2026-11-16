@@ -238,7 +238,6 @@ cannot turn them red.
 | `app.js` | Lock screen, data layer, rendering |
 | `tests.html` / `tests.js` | Test runner for `stats.js` |
 | `worker/` | The Cloudflare Worker + D1 server, deployed with Wrangler |
-| `schema.sql`, `migration_*.sql`, `import_sessions.sql` | The old Supabase (Postgres) schema, from before the move to Cloudflare in Nov 2026. Reference only; nothing runs them. |
 
 The two structural rules worth keeping: anything deterministic enough to test
 belongs in `stats.js`, and anything that sums across sessions must convert to
